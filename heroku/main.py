@@ -49,10 +49,6 @@ from herokutl.errors.rpcerrorlist import (
     UserDeactivatedError,
     YouBlockedUserError,
 )
-from herokutl.network.connection import (
-    ConnectionTcpFull,
-    ConnectionTcpMTProxyRandomizedIntermediate,
-)
 from herokutl.password import compute_check
 from herokutl.sessions import MemorySession, SQLiteSession, StringSession
 from herokutl.tl.functions.account import GetPasswordRequest
@@ -75,7 +71,7 @@ from .dispatcher import CommandDispatcher
 from .network import (
     ConnectionWsObfuscated,
     cli_transport_default,
-    decide_connection_mode,
+    connection_for_settings,
     egress_proxy_url,
     normalize_transport_name,
     redact_proxy_url,
@@ -451,17 +447,28 @@ class Heroku:
         secret = self.arguments.proxy_secret
         proxy_type = (self.arguments.proxy_type or "mtproxy").lower()
         transport = normalize_transport_name(getattr(self.arguments, "transport", None))
+        explicit_proxy = bool(host or port or secret)
+        # ``tcp`` must not treat a local CONNECT tunnel as a reason to leave TCP.
+        egress = None if transport == "tcp" or explicit_proxy else egress_proxy_url()
 
-        if not host and not port and not secret:
-            egress = None if transport == "tcp" else egress_proxy_url()
-            mode = decide_connection_mode(
-                transport,
-                proxy_host=host,
-                proxy_port=port,
-                proxy_secret=secret,
-                egress_url=egress,
+        if explicit_proxy and transport == "ws":
+            logging.warning(
+                "Proxy flags are set, so Heroku is using the %s proxy from --proxy-host",
+                proxy_type,
             )
-            if mode == "ws":
+
+        # Same helper the inline bot uses when the user client has no class yet.
+        self.conn, self.proxy = connection_for_settings(
+            transport,
+            proxy_host=host,
+            proxy_port=port,
+            proxy_secret=secret,
+            proxy_type=proxy_type,
+            egress_url=egress,
+        )
+
+        if not explicit_proxy:
+            if self.conn is ConnectionWsObfuscated:
                 if egress:
                     logging.info(
                         "MTProto transport: obfuscated WebSocket via %s",
@@ -469,43 +476,15 @@ class Heroku:
                     )
                 else:
                     logging.info("MTProto transport: obfuscated WebSocket (direct WSS)")
-                self.proxy, self.conn = None, ConnectionWsObfuscated
-                return
-
-            logging.info("MTProto transport: TCP full")
-            self.proxy, self.conn = None, ConnectionTcpFull
+            else:
+                logging.info("MTProto transport: TCP full")
             return
-
-        if transport == "ws":
-            logging.warning(
-                "Proxy flags are set, so Heroku is using the %s proxy from --proxy-host",
-                proxy_type,
-            )
-
-        if not host or not port:
-            raise ValueError("--proxy-host and --proxy-port must be passed together")
 
         if proxy_type == "mtproxy":
-            if not secret:
-                raise ValueError("--proxy-secret is required for --type-proxy mtproxy")
-
             logging.debug("Using MTProxy: %s:%s", host, port)
-            self.proxy = (host, port, secret)
-            self.conn = ConnectionTcpMTProxyRandomizedIntermediate
             return
 
-        if secret:
-            raise ValueError(
-                "--proxy-secret can only be used with --type-proxy mtproxy"
-            )
-
         logging.debug("Using %s proxy: %s:%s", proxy_type, host, port)
-        self.proxy = {
-            "proxy_type": proxy_type,
-            "addr": host,
-            "port": port,
-        }
-        self.conn = ConnectionTcpFull
 
     def _migrate_sessions(self):
         os.makedirs(SESSIONS_DIR, mode=0o700, exist_ok=True)
