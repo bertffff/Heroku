@@ -178,6 +178,18 @@ class APIRatelimiterMod(loader.Module):
             ordered: bool = False,
             flood_sleep_threshold: int = None,
         ):
+            # Hold new API calls while a local floodwait is in progress without
+            # freezing every other task on the event loop. The task that owns
+            # the wait must still be able to send the warning.
+            task = asyncio.current_task()
+            if (
+                task is not None
+                and self._lock
+                and not getattr(task, "_heroku_api_fw", False)
+            ):
+                while self._lock:
+                    await asyncio.sleep(0.05)
+
             req = (request,) if not is_list_like(request) else request
             for r in req:
                 if (
@@ -214,27 +226,41 @@ class APIRatelimiterMod(loader.Module):
                         and not self._lock
                     ):
                         self._lock = True
-                        report_bytes = json.dumps(
-                            self._ratelimiter,
-                            indent=4,
-                        ).encode()
-                        report = io.BytesIO(report_bytes)
-                        report.name = "local_fw_report.json"
+                        if task is not None:
+                            setattr(task, "_heroku_api_fw", True)
+                        try:
+                            report_bytes = json.dumps(
+                                self._ratelimiter,
+                                indent=4,
+                            ).encode()
+                            report = io.BytesIO(report_bytes)
+                            report.name = "local_fw_report.json"
 
-                        await self.inline.bot.send_document(
-                            self.tg_id,
-                            report,
-                            caption=self.inline.sanitise_text(
-                                self.strings["warning"].format(
-                                    self.config["local_floodwait"],
-                                    prefix=utils.escape_html(self.get_prefix()),
-                                )
-                            ),
-                        )
+                            await self.inline.bot.send_document(
+                                self.tg_id,
+                                report,
+                                caption=self.inline.sanitise_text(
+                                    self.strings["warning"].format(
+                                        self.config["local_floodwait"],
+                                        prefix=utils.escape_html(self.get_prefix()),
+                                    )
+                                ),
+                            )
 
-                        # It is intented to use time.sleep instead of asyncio.sleep
-                        time.sleep(int(self.config["local_floodwait"]))
-                        self._lock = False
+                            wait_s = max(0, int(self.config["local_floodwait"]))
+                            # Exponential-ish backoff stays on the loop: other
+                            # userbot work can run, and new API calls wait above.
+                            step = 1
+                            remaining = wait_s
+                            while remaining > 0:
+                                nap = min(step, remaining)
+                                await asyncio.sleep(nap)
+                                remaining -= nap
+                                step = min(step * 2, 30)
+                        finally:
+                            self._lock = False
+                            if task is not None:
+                                setattr(task, "_heroku_api_fw", False)
 
             return await old_call(sender, request, ordered, flood_sleep_threshold)
 

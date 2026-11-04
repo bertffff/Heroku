@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 
 try:
@@ -54,6 +55,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+_SAVE_DEBOUNCE_SEC = 2.0
 
 
 class NoAssetsChannel(Exception):
@@ -73,6 +75,11 @@ class Database(dict):
         self._me: User = None
         self._redis: redis.Redis = None
         self._saving_task: asyncio.Future = None
+        self._dirty: bool = False
+        self._write_gen: int = 0
+        self._write_lock = threading.Lock()
+        self._save_handle: asyncio.TimerHandle | None = None
+        self._flush_task: asyncio.Task | None = None
 
     def __repr__(self):
         return object.__repr__(self)
@@ -250,47 +257,145 @@ class Database(dict):
 
         return True
 
-    def save(self) -> bool:
-        """Save database"""
+    def _cancel_pending_save(self) -> None:
+        if self._save_handle is not None:
+            self._save_handle.cancel()
+            self._save_handle = None
+
+    def _note_dirty(self) -> None:
+        """Schedule a debounced flush. Writes immediately if no loop is running."""
+        self._dirty = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.save()
+            return
+
+        self._cancel_pending_save()
+        self._save_handle = loop.call_later(_SAVE_DEBOUNCE_SEC, self._kick_flush)
+
+    def _kick_flush(self) -> None:
+        self._save_handle = None
+        if self._flush_task and not self._flush_task.done():
+            return
+        self._flush_task = asyncio.create_task(self.flush())
+
+    def _snapshot_payload(self) -> str:
+        """Validate the live database and return a JSON snapshot.
+
+        Revisions keep a deep copy and drop the oldest entry. Restoring a broken
+        database still pops the newest revision first.
+        """
         register_secrets(self)
         if not self.process_db_autofix(self):
             try:
-                rev = self._revisions.pop()
+                rev = copy.deepcopy(self._revisions.pop())
                 while not self.process_db_autofix(rev):
-                    rev = self._revisions.pop()
+                    rev = copy.deepcopy(self._revisions.pop())
             except IndexError:
                 raise RuntimeError(
                     "Can't find revision to restore broken database from "
                     "database is most likely broken and will lead to problems, "
                     "so its save is forbidden."
-                )
+                ) from None
 
             self.clear()
-            self.update(**rev)
-
-            raise RuntimeError(
-                "Rewriting database to the last revision because new one destructed it"
+            self.update(rev)
+            logger.error(
+                "Rewriting database to the last revision because the new one "
+                "was not serializable"
             )
 
         if self._next_revision_call < time.time():
-            self._revisions += [dict(self)]
+            self._revisions.append(copy.deepcopy(dict(self)))
             self._next_revision_call = time.time() + 3
 
         while len(self._revisions) > 15:
-            self._revisions.pop()
+            self._revisions.pop(0)
 
+        self._write_gen += 1
+        self._dirty = False
+        return json.dumps(self, indent=4)
+
+    def _commit_payload(self, generation: int, payload: str) -> bool:
+        with self._write_lock:
+            if generation != self._write_gen:
+                return False
+            private_write(self._db_file, payload)
+        return True
+
+    def save(self) -> bool:
+        """Save database immediately.
+
+        Explicit callers (backups, shutdown-adjacent code) still get a finished
+        write. Hot ``set`` paths use :meth:`_note_dirty` instead.
+        """
+        self._cancel_pending_save()
         if self._redis:
+            self._dirty = False
             if not self._saving_task:
-                self._saving_task = asyncio.ensure_future(self._redis_save())
+                try:
+                    self._saving_task = asyncio.ensure_future(self._redis_save())
+                except RuntimeError:
+                    self._redis_save_sync()
             return True
 
         try:
-            private_write(self._db_file, json.dumps(self, indent=4))
+            generation = self._write_gen + 1
+            payload = self._snapshot_payload()
+        except RuntimeError:
+            raise
         except Exception:
             logger.exception("Database save failed!")
+            self._dirty = True
+            return False
+
+        try:
+            self._commit_payload(generation, payload)
+        except Exception:
+            logger.exception("Database save failed!")
+            self._dirty = True
             return False
 
         return True
+
+    async def flush(self) -> bool:
+        """Write a dirty database without blocking the event loop on fsync."""
+        self._cancel_pending_save()
+        if not self._dirty:
+            return True
+
+        if self._redis:
+            self._dirty = False
+            try:
+                return await self.remote_force_save()
+            except Exception:
+                self._dirty = True
+                logger.exception("Database save failed!")
+                return False
+
+        try:
+            generation = self._write_gen + 1
+            payload = self._snapshot_payload()
+        except RuntimeError:
+            logger.exception("Database save refused")
+            self._dirty = False
+            return False
+        except Exception:
+            self._dirty = True
+            logger.exception("Database save failed!")
+            return False
+
+        try:
+            wrote = await asyncio.to_thread(self._commit_payload, generation, payload)
+        except Exception:
+            self._dirty = True
+            logger.exception("Database save failed!")
+            return False
+
+        if self._dirty:
+            self._note_dirty()
+        return wrote
 
     async def store_asset(self, message: Message) -> int:
         """
@@ -354,8 +459,25 @@ class Database(dict):
         key: str,
         default: JSONSerializable | None = None,
     ) -> JSONSerializable:
-        """Get database key snapshot"""
+        """Get database key snapshot.
+
+        Modules may mutate the returned object, so this stays a deep copy.
+        Core hot paths should use :meth:`get_readonly`.
+        """
         return copy.deepcopy(self._get_raw(owner, key, default))
+
+    def get_readonly(
+        self,
+        owner: str,
+        key: str,
+        default: JSONSerializable | None = None,
+    ) -> JSONSerializable:
+        """Get a database key without copying it.
+
+        The caller must not mutate the result. A mutation would change the
+        in-memory database without a save.
+        """
+        return self._get_raw(owner, key, default)
 
     def _get_raw(
         self,
@@ -393,7 +515,8 @@ class Database(dict):
             )
 
         super().setdefault(owner, {})[key] = value
-        return self.save()
+        self._note_dirty()
+        return True
 
     def __setitem__(self, owner: str, value: JSONSerializable) -> None:
         if not utils.is_serializable(owner):

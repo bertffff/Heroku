@@ -20,7 +20,7 @@ from herokutl.tl.types import Message
 from herokutl.types import InputMediaWebPage
 
 
-from .. import loader, utils
+from .. import loader, translations, utils
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,35 @@ logger = logging.getLogger(__name__)
 class Help(loader.Module):
     """Shows help for modules and commands"""
 
-    strings = {"name": "Help"}
+    strings = {
+        "name": "Help",
+        "onboarding": (
+            "<b>Hello.</b> Your <b>{}</b> userbot is installed.\n\n"
+            "<b>Quick guide:</b>\n"
+            "1. <code>.help</code> lists modules\n"
+            "2. <code>.help &lt;module or command&gt;</code> shows one module\n"
+            "3. <code>.dlmod &lt;link&gt;</code> loads a module from a link\n"
+            "4. <code>.loadmod</code> in reply to a file loads that file\n"
+            "5. <code>.unloadmod &lt;module&gt;</code> unloads a module\n\n"
+            "Heroku still loads Hikka, FTG, and GeekTG modules. "
+            "Pick a language below. Only English and Russian are built in."
+        ),
+        "onboarding_saved": "Language saved",
+    }
+    strings_ru = {
+        "onboarding": (
+            "<b>Привет.</b> Юзербот <b>{}</b> установлен.\n\n"
+            "<b>Коротко:</b>\n"
+            "1. <code>.help</code> — список модулей\n"
+            "2. <code>.help &lt;модуль или команда&gt;</code> — описание\n"
+            "3. <code>.dlmod &lt;ссылка&gt;</code> — модуль по ссылке\n"
+            "4. <code>.loadmod</code> ответом на файл — модуль из файла\n"
+            "5. <code>.unloadmod &lt;модуль&gt;</code> — выгрузить модуль\n\n"
+            "Совместимость с модулями Hikka, FTG и GeekTG сохранена. "
+            "Ниже можно выбрать язык. В сборке есть только русский и английский."
+        ),
+        "onboarding_saved": "Язык сохранён",
+    }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -584,3 +612,44 @@ class Help(loader.Module):
             message,
             self.strings["offchats"],
         )
+
+    async def inline_ready(self):
+        if self.get("onboarding_sent") or self._db.get("Quickstart", "no_msg", False):
+            return
+
+        await self.inline.bot.send_message(
+            self._client.tg_id,
+            self.strings["onboarding"].format(
+                utils.get_platform_emoji()
+                if getattr(self._client.heroku_me, "premium", False)
+                else "Heroku"
+            ),
+            reply_markup=self.inline.generate_markup(self._onboarding_markup()),
+            disable_web_page_preview=True,
+        )
+        self.set("onboarding_sent", True)
+
+    def _onboarding_markup(self):
+        return utils.chunks(
+            [
+                {
+                    "text": label,
+                    "data": f"heroku/lang/{code}",
+                }
+                for code, label in translations.SUPPORTED_LANGUAGES.items()
+            ],
+            2,
+        )
+
+    @loader.callback_handler()
+    async def lang(self, call):
+        if not str(getattr(call, "data", "")).startswith("heroku/lang/"):
+            return
+
+        lang = str(call.data).split("/")[2]
+        if lang not in translations.SUPPORTED_LANGUAGES:
+            return
+
+        self._db.set(translations.__name__, "lang", lang)
+        await self.allmodules.reload_translations()
+        await call.answer(self.strings["onboarding_saved"])

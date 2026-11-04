@@ -31,24 +31,9 @@ PACKS = Path(__file__).parent / "langpacks"
 SUPPORTED_LANGUAGES = {
     "en": "🇬🇧 English",
     "ru": "🇷🇺 Русский",
-    "uk": "🇺🇦 Український",
-    "de": "🇩🇪 Deutsch",
-    "ja": "🇯🇵 日本語",
 }
-LANGUAGE_ALIASES = {
-    "ua": "uk",
-    "jp": "ja",
-}
-LANGUAGE_COMPAT_ALIASES = {
-    "uk": ("ua",),
-    "ja": ("jp",),
-}
-MEME_LANGUAGES = {
-    "leet": "🏴‍☠️ 1337",
-    "uwu": "🏴‍☠️ UwU",
-    "tiktok": "🏴‍☠️ TikTokKid",
-    "neofit": "🏴‍☠️ Neofit",
-}
+LANGUAGE_ALIASES = {}
+LANGUAGE_COMPAT_ALIASES = {}
 
 
 def normalize_language(language: str) -> str:
@@ -280,7 +265,7 @@ class Translator(BaseTranslator):
                     self.raw_data[language] = data
                     any_ = True
 
-        for language in {**SUPPORTED_LANGUAGES, **MEME_LANGUAGES}:
+        for language in SUPPORTED_LANGUAGES:
             if language not in self.raw_data and (
                 possible_path := get_language_pack_path(language)
             ):
@@ -292,7 +277,7 @@ class Translator(BaseTranslator):
 class ExternalTranslator(BaseTranslator):
     def __init__(self):
         self.data = {}
-        for lang in {**SUPPORTED_LANGUAGES, **MEME_LANGUAGES}:
+        for lang in SUPPORTED_LANGUAGES:
             pack_path = get_language_pack_path(lang)
             self.data[lang] = (
                 self._get_pack_content(pack_path, prefix="") if pack_path else {}
@@ -348,14 +333,7 @@ class Strings:
                                 if self._translator is not None
                                 else ["en"]
                             )
-                            for lang in (
-                                list(iter_language_codes(original_lang))
-                                + (
-                                    ["en"]
-                                    if original_lang in ["leet", "uwu", "neofit"]
-                                    else ["ru"] if original_lang == "tiktok" else []
-                                )
-                            )
+                            for lang in (*iter_language_codes(original_lang), "en")
                             if hasattr(self._mod, f"strings_{lang}")
                             and isinstance(getattr(self._mod, f"strings_{lang}"), dict)
                             and key in getattr(self._mod, f"strings_{lang}")

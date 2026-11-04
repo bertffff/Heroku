@@ -355,7 +355,7 @@ class SecurityManager:
             # every time he changes permissions. It doesn't
             # decrease security at all, bc user anyway can
             # access this attribute
-            config = self._db.get(__name__, "masks", {}).get(
+            config = self._db.get_readonly(__name__, "masks", {}).get(
                 f"{func.__module__}.{func.__name__}",
                 getattr(func, "security", self._default),
             )
@@ -364,7 +364,9 @@ class SecurityManager:
             logger.error("Security config contains unknown bits")
             return False
 
-        return config & self._db.get(__name__, "bounding_mask", DEFAULT_PERMISSIONS)
+        return config & self._db.get_readonly(
+            __name__, "bounding_mask", DEFAULT_PERMISSIONS
+        )
 
     def _check_tsec_inline(self, user_id: int, command: str) -> bool:
         """
@@ -433,11 +435,18 @@ class SecurityManager:
         if not (config := self.get_flags(func)):
             return False
 
-        if not user_id:
+        if not user_id and message is not None:
             user_id = message.sender_id
 
-        if not user_id:
-            user_id = message.peer_id
+        if not user_id and message is not None:
+            peer = getattr(message, "peer_id", None)
+            if isinstance(peer, int):
+                user_id = peer
+            elif peer is not None:
+                try:
+                    user_id = utils.get_entity_id(peer)
+                except Exception:
+                    user_id = None
 
         is_channel = False
 
@@ -502,7 +511,7 @@ class SecurityManager:
         if user_id in self._owner:
             return True
 
-        if user_id in self._db.get(main.__name__, "blacklist_users", []):
+        if user_id in self._db.get_readonly(main.__name__, "blacklist_users", []):
             return False
 
         if message is None:  # In case of checking inline query security map
@@ -516,10 +525,29 @@ class SecurityManager:
             chat = None
 
         try:
-            cmd = message.raw_text[1:].split()[0].strip()
-            if usernames:
+            raw = message.raw_text or ""
+            prefixes: list[str] = []
+            mod_loader = getattr(self._client, "loader", None)
+            if mod_loader is not None and hasattr(mod_loader, "get_prefixes"):
+                prefixes = sorted(
+                    (prefix for prefix in mod_loader.get_prefixes() if prefix),
+                    key=len,
+                    reverse=True,
+                )
+
+            cmd = None
+            for prefix in prefixes:
+                if raw.startswith(prefix):
+                    rest = raw[len(prefix) :].lstrip()
+                    cmd = rest.split(maxsplit=1)[0] if rest else ""
+                    break
+            if cmd is None:
+                cmd = raw.split(maxsplit=1)[0] if raw else ""
+
+            if usernames and cmd:
                 for username in usernames:
                     cmd = cmd.replace(f"@{username}", "")
+            cmd = cmd.strip() or None
         except Exception:
             cmd = None
 

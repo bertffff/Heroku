@@ -12,8 +12,7 @@
 
 import logging
 
-from .. import loader, translations, utils
-from ..inline.types import BotInlineCall
+from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +24,6 @@ class Quickstart(loader.Module):
     strings = {"name": "Quickstart"}
 
     async def client_ready(self):
-        self.text = lambda: self.strings["base"].format(
-            utils.get_platform_emoji()
-            if self.client.heroku_me.premium is True
-            else "Heroku"
-        )
-
         try:
             content_channel = None
             existing_channel_id = self.db.get("heroku.forums", "channel_id", None)
@@ -137,51 +130,5 @@ class Quickstart(loader.Module):
                 "You can try solving this by leaving some channels/groups"
             )
 
-        await self.request_join(
-            "heroku_talks",
-            "Heroku help is only available in this chat. By agreeing to join the chat, you agree to the Heroku federation rules and if you violate them, you will be permanently banned.",
-        )
-
-        self.mark = lambda: [
-            [
-                {
-                    "text": self.strings["btn_support"],
-                    "url": "https://t.me/heroku_talks",
-                }
-            ],
-        ] + utils.chunks(
-            [
-                {
-                    "text": self.strings.get("language", lang),
-                    "data": f"heroku/lang/{lang}",
-                }
-                for lang in translations.SUPPORTED_LANGUAGES
-            ],
-            3,
-        )
-
-    async def inline_ready(self):
-        if self.get("no_msg"):
-            return
-
-        await self.inline.bot.send_message(
-            self._client.tg_id,
-            self.text(),
-            reply_markup=self.inline.generate_markup(self.mark()),
-            disable_web_page_preview=True,
-        )
-
-        self.set("no_msg", True)
-
-    @loader.callback_handler()
-    async def lang(self, call: BotInlineCall):
-        if not call.data.startswith("heroku/lang/"):
-            return
-
-        lang = call.data.split("/")[2]
-
-        self._db.set(translations.__name__, "lang", lang)
-        await self.allmodules.reload_translations()
-
-        await self.inline.bot(call.answer(self.strings["language_saved"]))
-        await call.edit(text=self.text(), reply_markup=self.mark())
+        # Welcome text and language choice live in Help. This module only
+        # prepares the private content channel used by backups and assets.

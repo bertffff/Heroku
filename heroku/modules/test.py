@@ -13,7 +13,6 @@
 import getpass
 import inspect
 import logging
-import os
 import platform as lib_platform
 import random
 import time
@@ -23,17 +22,10 @@ from herokutl.tl.types import Message
 from herokutl.types import InputMediaWebPage
 
 from .. import loader, main, utils
+from .._internal import redact
 from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
-
-DEBUG_MODS_DIR = os.path.join(utils.get_base_dir(), "debug_modules")
-
-if not os.path.isdir(DEBUG_MODS_DIR):
-    os.mkdir(DEBUG_MODS_DIR, mode=0o755)
-
-for mod in os.scandir(DEBUG_MODS_DIR):
-    os.remove(mod.path)
 
 
 @loader.tds
@@ -344,7 +336,14 @@ class TestMod(loader.Module):
             )
             return
 
-        logs = self.lookup("evaluator").censor(logs)
+        evaluator = self.lookup("evaluator")
+        if evaluator is not None:
+            logs = evaluator.censor(logs)
+        else:
+            logs = redact(logs)
+            phone = getattr(getattr(self._client, "heroku_me", None), "phone", None)
+            if phone:
+                logs = logs.replace(str(phone), "<phone>")
 
         logs = BytesIO(logs.encode("utf-8"))
         logs.name = "heroku-logs.txt"
@@ -355,7 +354,7 @@ class TestMod(loader.Module):
             *main.__version__,
             (
                 " <a"
-                f' href="https://github.com/Heroku-userbot/Heroku/commit/{ghash}">@{ghash[:8]}</a>'
+                f' href="https://github.com/bertffff/Heroku/commit/{ghash}">@{ghash[:8]}</a>'
                 if ghash
                 else ""
             ),
@@ -377,21 +376,6 @@ class TestMod(loader.Module):
                 reply_to=message.form["top_msg_id"],
             )
             await message.delete()
-
-    @loader.command()
-    async def suspend(self, message: Message):
-        try:
-            time_sleep = float(utils.get_args_raw(message))
-            if time_sleep > 86400 * 365 * 100:
-                await utils.answer(message, self.strings["suspend_invalid_time"])
-            else:
-                await utils.answer(
-                    message,
-                    self.strings["suspended"].format(time_sleep),
-                )
-                time.sleep(time_sleep)
-        except ValueError:
-            await utils.answer(message, self.strings["suspend_invalid_time"])
 
     @loader.command()
     async def ping(self, message: Message):

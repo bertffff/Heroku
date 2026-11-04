@@ -35,27 +35,46 @@ def hash_msg(message):
     return f"{str(utils.get_chat_id(message))}/{str(message.id)}"
 
 
-async def read_stream(func: Callable, stream, delay: float):
+async def read_stream(
+    func: Callable,
+    stream,
+    delay: float,
+    limit: int | None = None,
+    stop: asyncio.Event | None = None,
+):
     data = bytearray()
     dirty = False
     last_update = time.monotonic()
     interval = max(float(delay), 0.05)
-    while True:
+    while stop is None or not stop.is_set():
         try:
             chunk = await asyncio.wait_for(stream.read(4096), timeout=interval)
         except asyncio.TimeoutError:
             chunk = None
+        except Exception:
+            if dirty:
+                await func(data.decode(errors="replace"))
+            return None
         if chunk == b"":
             if dirty:
                 await func(data.decode(errors="replace"))
-            return
+            return None
         if chunk:
             data.extend(chunk)
             dirty = True
+            if limit is not None and len(data) > limit:
+                del data[limit:]
+                await func(data.decode(errors="replace"))
+                if stop is not None:
+                    stop.set()
+                return "limit"
         if dirty and time.monotonic() - last_update >= interval:
             await func(data.decode(errors="replace"))
             dirty = False
             last_update = time.monotonic()
+    if dirty:
+        await func(data.decode(errors="replace"))
+    return "stopped"
 
 
 def sudo_stdin_command(command, shell="/bin/sh"):
@@ -399,6 +418,24 @@ class TerminalMod(loader.Module):
 
     strings = {
         "name": "Terminal",
+        "dangerous_confirm": (
+            "<b>This command looks destructive:</b>\n<code>{}</code>\n\n"
+            "<b>Run it only if you meant to.</b>"
+        ),
+        "btn_allow": "Run",
+        "btn_deny": "Cancel",
+        "timed_out": "\n<b>Stopped: timeout ({}s).</b>",
+        "output_limited": "\n<b>Stopped: output limit reached.</b>",
+    }
+    strings_ru = {
+        "dangerous_confirm": (
+            "<b>Команда похожа на опасную:</b>\n<code>{}</code>\n\n"
+            "<b>Запускайте её только если это намеренно.</b>"
+        ),
+        "btn_allow": "Запустить",
+        "btn_deny": "Отмена",
+        "timed_out": "\n<b>Остановлено: таймаут ({} с).</b>",
+        "output_limited": "\n<b>Остановлено: лимит вывода.</b>",
     }
 
     COMMAND_PROTECT = "command_protect"
@@ -523,6 +560,123 @@ class TerminalMod(loader.Module):
                 return True
         return False
 
+    def _audit(self, action: str, cmd: str, user_id=None) -> None:
+        logger.warning(
+            "terminal_audit action=%s user=%s cmd=%s",
+            action,
+            user_id,
+            (cmd or "")[:500],
+        )
+
+    def _kill_process(self, process) -> None:
+        if process is None or process.returncode is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except Exception:
+            logger.debug("Failed to kill terminal process", exc_info=True)
+
+    async def _ask_dangerous(self, message, cmd: str) -> bool:
+        actor = getattr(message, "sender_id", None)
+        self._audit("dangerous_prompt", cmd, actor)
+        if not self.inline.init_complete:
+            await utils.answer(
+                message,
+                self.strings["dangerous_command"].format(utils.escape_html(cmd)),
+            )
+            self._audit("dangerous_denied", cmd, actor)
+            return False
+
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        async def _allow(call):
+            if not future.done():
+                future.set_result(True)
+
+        async def _deny(call):
+            if not future.done():
+                future.set_result(False)
+
+        shown = await self.inline.form(
+            message=message,
+            text=self.strings["dangerous_confirm"].format(utils.escape_html(cmd)),
+            reply_markup=[
+                {"text": self.strings["btn_allow"], "callback": _allow},
+                {"text": self.strings["btn_deny"], "callback": _deny},
+            ],
+        )
+        if not shown:
+            self._audit("dangerous_denied", cmd, actor)
+            return False
+        try:
+            allowed = await asyncio.wait_for(future, timeout=60)
+        except asyncio.TimeoutError:
+            allowed = False
+        self._audit(
+            "dangerous_allowed" if allowed else "dangerous_denied",
+            cmd,
+            actor,
+        )
+        if not allowed:
+            await utils.answer(
+                message,
+                self.strings["dangerous_command"].format(utils.escape_html(cmd)),
+            )
+        return bool(allowed)
+
+    async def _collect_output(self, process, stdout_cb, stderr_cb) -> str | None:
+        stop = asyncio.Event()
+        limit = int(self.config["OUTPUT_LIMIT"])
+        timeout = float(self.config["TIMEOUT"])
+        reason: str | None = None
+
+        async def _timer():
+            nonlocal reason
+            await asyncio.sleep(timeout)
+            if not stop.is_set():
+                reason = "timeout"
+                stop.set()
+                self._kill_process(process)
+
+        timer = asyncio.create_task(_timer())
+        try:
+            results = await asyncio.gather(
+                read_stream(
+                    stdout_cb,
+                    process.stdout,
+                    self.config["FLOOD_WAIT_PROTECT"],
+                    limit,
+                    stop,
+                ),
+                read_stream(
+                    stderr_cb,
+                    process.stderr,
+                    self.config["FLOOD_WAIT_PROTECT"],
+                    limit,
+                    stop,
+                ),
+            )
+        finally:
+            timer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await timer
+
+        if reason == "timeout":
+            return "timeout"
+        if "limit" in results:
+            self._kill_process(process)
+            return "limit"
+        return None
+
+    def _note_output_limit(self, editor, cmd: str, outcome: str | None) -> None:
+        if outcome == "timeout":
+            self._audit("timeout", cmd)
+            editor.stdout += f"\n[timeout {self.config['TIMEOUT']}s]"
+        elif outcome == "limit":
+            self._audit("output_limit", cmd)
+            editor.stderr += "\n[output limit]"
+
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
@@ -536,6 +690,18 @@ class TerminalMod(loader.Module):
                 True,
                 lambda: self.strings["command_protect"],
                 validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
+                "TIMEOUT",
+                60,
+                "Maximum seconds a terminal command may run",
+                validator=loader.validators.Integer(minimum=1),
+            ),
+            loader.ConfigValue(
+                "OUTPUT_LIMIT",
+                65536,
+                "Maximum captured stdout/stderr bytes before the process is stopped",
+                validator=loader.validators.Integer(minimum=1024),
             ),
         )
         self.activecmds = {}
@@ -590,6 +756,7 @@ class TerminalMod(loader.Module):
             "inline_message_id": inline_message_id,
         }
 
+    @loader.owner
     @loader.command(alias="exec")
     async def terminalcmd(self, message):
         user_command = utils.get_args_raw(message)
@@ -598,17 +765,9 @@ class TerminalMod(loader.Module):
         if not user_command and reply and reply.message:
             user_command = reply.message
 
-        if self._is_dangerous(user_command):
-            await utils.answer(
-                message,
-                self.strings["dangerous_command"].format(
-                    utils.escape_html(user_command)
-                ),
-            )
-            return
-
         await self.run_command(message, user_command)
 
+    @loader.owner
     @loader.inline_handler()
     async def exec_inline_handler(self, query):
         """Execute terminal command via inline"""
@@ -640,19 +799,25 @@ class TerminalMod(loader.Module):
             return
 
         if self._is_dangerous(raw):
+            uid = utils.rand(8)
+            self._inline_pending[uid] = raw
+            self._audit("inline_dangerous_prompt", raw, query.from_user.id)
             await query.answer(
                 [
                     await query.builder.article(
                         title=self.strings["inline_hint"],
                         description=short_cmd(raw),
-                        text=self.strings["dangerous_command"].format(
+                        text=self.strings["dangerous_confirm"].format(
                             utils.escape_html(raw)
                         ),
                         parse_mode="HTML",
                         thumb=self.inline._web_document(
                             BANNER_BAD, width=640, height=640
                         ),
-                        id="dangerous",
+                        buttons=self.inline.generate_markup(
+                            self._build_inline_exec_markup(uid)
+                        ),
+                        id=uid,
                     )
                 ],
                 cache_time=0,
@@ -681,6 +846,7 @@ class TerminalMod(loader.Module):
             private=True,
         )
 
+    @loader.owner
     @loader.callback_handler()
     async def exec_callback(self, call):
         if not call.data.startswith("terminal/exec/"):
@@ -693,12 +859,11 @@ class TerminalMod(loader.Module):
             await call.answer("Command not found or already executed", show_alert=True)
             return
 
-        if self._is_dangerous(cmd):
-            await call.answer(
-                self.strings["dangerous_command"].format(cmd),
-                show_alert=True,
-            )
-            return
+        self._audit(
+            "inline_exec",
+            cmd,
+            getattr(getattr(call, "from_user", None), "id", None),
+        )
 
         self._register_inline_session(uid, call.inline_message_id)
 
@@ -774,19 +939,14 @@ class TerminalMod(loader.Module):
         editor.update_process(sproc)
         await editor.redraw()
 
-        await asyncio.gather(
-            read_stream(
-                editor.update_stdout,
-                sproc.stdout,
-                self.config["FLOOD_WAIT_PROTECT"],
-            ),
-            read_stream(
-                editor.update_stderr,
-                sproc.stderr,
-                self.config["FLOOD_WAIT_PROTECT"],
-            ),
+        outcome = await self._collect_output(
+            sproc,
+            editor.update_stdout,
+            editor.update_stderr,
         )
-
+        self._note_output_limit(editor, cmd, outcome)
+        if sproc.returncode is None:
+            self._kill_process(sproc)
         await editor.cmd_ended(await sproc.wait())
 
     async def run_command(
@@ -796,12 +956,11 @@ class TerminalMod(loader.Module):
         editor: MessageEditor | None = None,
     ):
 
-        if self._is_dangerous(cmd):
-            await utils.answer(
-                message,
-                self.strings["dangerous_command"].format(utils.escape_html(cmd)),
-            )
-            return
+        if cmd and self._is_dangerous(cmd):
+            if not await self._ask_dangerous(message, cmd):
+                return
+
+        self._audit("exec", cmd or "", getattr(message, "sender_id", None))
 
         shell = os.environ.get("SHELL") or "/bin/sh"
         utils.ensure_child_watcher()
@@ -833,19 +992,14 @@ class TerminalMod(loader.Module):
 
         await editor.redraw()
 
-        await asyncio.gather(
-            read_stream(
-                editor.update_stdout,
-                sproc.stdout,
-                self.config["FLOOD_WAIT_PROTECT"],
-            ),
-            read_stream(
-                editor.update_stderr,
-                sproc.stderr,
-                self.config["FLOOD_WAIT_PROTECT"],
-            ),
+        outcome = await self._collect_output(
+            sproc,
+            editor.update_stdout,
+            editor.update_stderr,
         )
-
+        self._note_output_limit(editor, cmd, outcome)
+        if sproc.returncode is None:
+            self._kill_process(sproc)
         await editor.cmd_ended(await sproc.wait())
         del self.activecmds[hash_msg(message)]
 
@@ -880,6 +1034,7 @@ class TerminalMod(loader.Module):
 
         return None
 
+    @loader.owner
     @loader.command(alias="kill")
     async def terminatecmd(self, message):
         if not message.is_reply:

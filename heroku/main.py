@@ -75,7 +75,6 @@ from .dispatcher import CommandDispatcher
 from .qr import QRCode
 from .secure import patcher
 from .tl_cache import CustomTelegramClient
-from .utils.other import allowed_ids as get_allowed_ids
 from .translations import Translator
 from .version import __version__
 
@@ -159,160 +158,34 @@ def get_app_name() -> str:
     return app_name
 
 
+DESKTOP_SYSTEM_VERSIONS = (
+    "Windows 10",
+    "Windows 11",
+    "Windows 10.0.19045",
+    "macOS 13.6.7",
+    "macOS 14.5",
+    "macOS 15.1",
+    "Ubuntu 22.04.5 LTS",
+    "Ubuntu 24.04.1 LTS",
+    "Debian 12",
+    "Fedora 40",
+)
+
+
 def generate_random_system_version():
     """
-    Generates a random system version string similar to those used by Windows or Linux.
+    Return one realistic desktop fingerprint and reuse it for this install.
 
-    This function generates a random version string that follows the format used by operating systems
-    like Windows or Linux. The version string includes the major version, minor version, patch number,
-    and build number, each of which is randomly generated within specified ranges. Additionally, it
-    includes a random operating system name and version.
-
-    :return: A randomly generated system version string.
-    :example: "Windows 10.0.19042.1234" or "Ubuntu 20.04.19042.1234"
+    The name is kept for callers that still import it. The value is chosen once
+    from a small desktop pool and stored next to ``app_name``.
     """
-    os_choices = [
-        ("Windows", "3.1"),
-        ("Windows", "95"),
-        ("Windows", "98"),
-        ("Windows", "ME"),
-        ("Windows", "NT 4.0"),
-        ("Windows", "2000"),
-        ("Windows", "XP"),
-        ("Windows", "Server 2003"),
-        ("Windows", "Vista"),
-        ("Windows", "7"),
-        ("Windows", "8"),
-        ("Windows", "8.1"),
-        ("Windows", "10"),
-        ("Windows", "11"),
-        ("Windows", "Server 2016"),
-        ("Windows", "Server 2019"),
-        ("Windows", "Server 2022"),
-        ("macOS", "10.9 Mavericks"),
-        ("macOS", "10.10 Yosemite"),
-        ("macOS", "10.11 El Capitan"),
-        ("macOS", "10.12 Sierra"),
-        ("macOS", "10.13 High Sierra"),
-        ("macOS", "10.14 Mojave"),
-        ("macOS", "10.15 Catalina"),
-        ("macOS", "11 Big Sur"),
-        ("macOS", "12 Monterey"),
-        ("macOS", "13 Ventura"),
-        ("macOS", "14 Sonoma"),
-        ("iOS", "12.5.7"),
-        ("iOS", "13.7"),
-        ("iOS", "14.8"),
-        ("iOS", "15.7"),
-        ("iOS", "16.6"),
-        ("iOS", "17.4"),
-        ("iPadOS", "16.4"),
-        ("Android", "4.4 KitKat"),
-        ("Android", "5.0 Lollipop"),
-        ("Android", "6.0 Marshmallow"),
-        ("Android", "7.0 Nougat"),
-        ("Android", "8.0 Oreo"),
-        ("Android", "9 Pie"),
-        ("Android", "10"),
-        ("Android", "11"),
-        ("Android", "12"),
-        ("Android", "13"),
-        ("Android", "14"),
-        ("Android", "15"),
-        ("Android", "16"),
-        ("ChromeOS", "89"),
-        ("ChromeOS", "96"),
-        ("ChromeOS", "100"),
-        ("ChromeOS", "110"),
-        ("Ubuntu", "14.04"),
-        ("Ubuntu", "16.04"),
-        ("Ubuntu", "18.04"),
-        ("Ubuntu", "19.10"),
-        ("Ubuntu", "20.04"),
-        ("Ubuntu", "21.04"),
-        ("Ubuntu", "21.10"),
-        ("Ubuntu", "22.04"),
-        ("Ubuntu", "22.10"),
-        ("Ubuntu", "23.04"),
-        ("Ubuntu", "23.10"),
-        ("Ubuntu", "24.04"),
-        ("Debian", "7 wheezy"),
-        ("Debian", "8 jessie"),
-        ("Debian", "9 stretch"),
-        ("Debian", "10 buster"),
-        ("Debian", "11 bullseye"),
-        ("Debian", "12 bookworm"),
-        ("Fedora", "28"),
-        ("Fedora", "29"),
-        ("Fedora", "30"),
-        ("Fedora", "31"),
-        ("Fedora", "32"),
-        ("Fedora", "33"),
-        ("Fedora", "34"),
-        ("Fedora", "35"),
-        ("Fedora", "36"),
-        ("Fedora", "37"),
-        ("Fedora", "38"),
-        ("Fedora", "39"),
-        ("CentOS", "6"),
-        ("CentOS", "7"),
-        ("CentOS", "8"),
-        ("CentOS Stream", "8"),
-        ("CentOS Stream", "9"),
-        ("AlmaLinux", "8.6"),
-        ("AlmaLinux", "9.1"),
-        ("Rocky Linux", "8.6"),
-        ("Rocky Linux", "9.0"),
-        ("Arch Linux", "rolling-2021.05.01"),
-        ("Arch Linux", "rolling-2022.11.01"),
-        ("Manjaro", "21.0"),
-        ("Manjaro", "22.0"),
-        ("Linux Mint", "18 Sarah"),
-        ("Linux Mint", "19 Tara"),
-        ("Linux Mint", "20 Ulyana"),
-        ("Linux Mint", "21 Vanessa"),
-        ("elementary OS", "5 Hera"),
-        ("elementary OS", "6 Odin"),
-        ("Pop!_OS", "20.04"),
-        ("Pop!_OS", "22.04"),
-        ("openSUSE Leap", "15.0"),
-        ("openSUSE Leap", "15.3"),
-        ("SUSE Enterprise", "15 SP1"),
-        ("FreeBSD", "11.4"),
-        ("FreeBSD", "12.3"),
-        ("FreeBSD", "13.0"),
-        ("FreeBSD", "14.0"),
-        ("OpenBSD", "6.7"),
-        ("OpenBSD", "7.0"),
-        ("NetBSD", "9.2"),
-        ("Solaris", "10"),
-        ("Solaris", "11.4"),
-        ("Haiku", "R1/beta3"),
-        ("BeOS", "R5"),
-        ("MorphOS", "3.18"),
-        ("AROS", "2019"),
-        ("ReactOS", "0.4.13"),
-        ("QNX", "7.0"),
-        ("Tizen", "5.5"),
-        ("HarmonyOS", "2.0"),
-        ("KaiOS", "2.5"),
-        ("Raspberry Pi OS", "9 stretch"),
-        ("Raspberry Pi OS", "10 buster"),
-        ("Raspberry Pi OS", "11 bullseye"),
-        ("Puppy Linux", "9.5"),
-        ("Alpine Linux", "3.18.0"),
-        ("Gentoo", "2023.0"),
-        ("Slackware", "14.2"),
-        ("TV OS", "Samsung Tizen 6"),
-        ("Amazon Fire OS", "7"),
-        ("MS-DOS", "6.22"),
-        ("AmigaOS", "3.1"),
-        ("Commodore", "64 OS"),
-    ]
-    os_name, os_version = random.choice(os_choices)
+    saved = get_config_key("system_version")
+    if isinstance(saved, str) and saved in DESKTOP_SYSTEM_VERSIONS:
+        return saved
 
-    version = f"{os_name} {os_version}"
-    return version
+    choice = random.choice(DESKTOP_SYSTEM_VERSIONS)
+    save_config_key("system_version", choice)
+    return choice
 
 
 def run_config():
@@ -1030,12 +903,6 @@ class Heroku:
             register_secret(StringSession.save(client.session))
             register_secret(getattr(me, "phone", None))
 
-            async with self._allowed_ids_lock:
-                if self._allowed_ids is None:
-                    self._allowed_ids = await get_allowed_ids(client)
-
-            await version.check_branch(me.id, self._allowed_ids, self)
-
             who = f"{me.id}" + (f" (@{me.username})" if me.username else "")
             try:
                 while await self.amain(first, client):
@@ -1247,11 +1114,16 @@ class Heroku:
             return
 
         self.loop.set_exception_handler(self._loop_exception_handler)
-        self._allowed_ids = None
-        self._allowed_ids_lock = asyncio.Lock()
         await asyncio.gather(*[self.amain_wrapper(client) for client in self.clients])
 
     async def _shutdown_handler(self):
+        for client in self.clients:
+            db = getattr(client, "heroku_db", None)
+            if db is not None and hasattr(db, "flush"):
+                try:
+                    await db.flush()
+                except Exception:
+                    logging.exception("Failed to flush database on shutdown")
         for client in self.clients:
             inline = getattr(client.loader, "inline", None)
             if inline:
