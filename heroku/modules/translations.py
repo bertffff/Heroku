@@ -53,6 +53,7 @@ class Translations(loader.Module):
     async def _choose_language(
         self, message: Message | InlineCall, is_meme: bool = False
     ):
+        del is_meme  # Joke locales are not loaded. Old buttons still call this.
         reply_markup = utils.chunks(
             [
                 {
@@ -60,29 +61,16 @@ class Translations(loader.Module):
                     "callback": self._change_language,
                     "args": (lang,),
                 }
-                for lang, text in (
-                    translations.SUPPORTED_LANGUAGES.items()
-                    if not is_meme
-                    else translations.MEME_LANGUAGES.items()
-                )
+                for lang, text in translations.SUPPORTED_LANGUAGES.items()
             ],
             2,
         )
-
-        back_btn = {
-            "text": (
-                self.strings["off_langs"] if is_meme else self.strings["meme_langs"]
-            ),
-            "callback": self._choose_language,
-            "args": (not is_meme,),
-        }
 
         downloaded_btn = {
             "text": self.strings["downloaded_langs"],
             "callback": self._show_downloaded,
         }
 
-        reply_markup.append([back_btn])
         reply_markup.append([downloaded_btn])
 
         await utils.answer(
@@ -209,9 +197,6 @@ class Translations(loader.Module):
             "uz": "🇺🇿",
         }
 
-        for meme in translations.MEME_LANGUAGES.keys():
-            lang2country[meme] = "🏴‍☠️"
-
         lang = lang2country.get(lang) or utils.get_lang_flag(lang)
         return emoji_flags.get(lang, lang)
 
@@ -221,7 +206,7 @@ class Translations(loader.Module):
             await self._choose_language(message=message)
             return
 
-        known_langs = set(translations.SUPPORTED_LANGUAGES) | set(translations.MEME_LANGUAGES)
+        known_langs = set(translations.SUPPORTED_LANGUAGES)
         if any(i not in known_langs and not utils.check_url(i) for i in args.split()):
             await utils.answer(message, self.strings["incorrect_language"])
             return
@@ -253,7 +238,6 @@ class Translations(loader.Module):
                 ("\n\n" + self.strings["not_official"])
                 if any(
                     lang not in translations.SUPPORTED_LANGUAGES
-                    and lang not in translations.MEME_LANGUAGES
                     for lang in args.split()
                 )
                 else ""

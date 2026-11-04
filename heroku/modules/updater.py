@@ -11,7 +11,6 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 
-import ast
 import asyncio
 import contextlib
 import errno
@@ -23,7 +22,6 @@ import sys
 import time
 import typing
 
-import aiohttp
 import git
 from git import Repo
 from herokutl.tl.functions.messages import (
@@ -53,7 +51,20 @@ os.environ["GIT_ASKPASS"] = "echo"
 class UpdaterMod(loader.Module):
     """Updates itself, tracks latest Heroku releases, and notifies you, if update is required"""
 
-    strings = {"name": "Updater"}
+    strings = {
+        "name": "Updater",
+        "autoupdate_disabled": (
+            "<b>Background autoupdate is disabled in this fork.</b> "
+            "Use <code>.update</code> when you want to pull this repository."
+        ),
+    }
+    strings_ru = {
+        "autoupdate_disabled": (
+            "<b>Фоновое автообновление в этом форке выключено.</b> "
+            "Используйте <code>.update</code>, чтобы забрать коммиты вручную."
+        ),
+    }
+    FORK_ORIGIN = "https://github.com/bertffff/Heroku"
     _GIT_FETCH_INTERVAL = 300
     _EMFILE_FETCH_BACKOFF = 900
 
@@ -65,7 +76,7 @@ class UpdaterMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "GIT_ORIGIN_URL",
-                "https://github.com/Heroku-userbot/Heroku",
+                "https://github.com/bertffff/Heroku",
                 lambda: self.strings["origin_cfg_doc"],
                 validator=loader.validators.Link(),
             ),
@@ -142,37 +153,45 @@ class UpdaterMod(loader.Module):
         return res
 
     def _get_update_state(self) -> tuple[str, str, str | typing.Literal[False]]:
+        """Read already-fetched refs. Network fetch stays on the manual update path."""
         with git.Repo() as repo:
-            origin = repo.remote("origin")
-            now = time.monotonic()
-            if now >= self._git_fetch_backoff_until:
-                if now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL:
-                    logger.debug("Fetching changelog from %s", origin.url)
-                    subprocess.run(
-                        ["git", "fetch", "--quiet", "origin"],
-                        cwd=repo.working_dir,
-                        timeout=60,
-                        capture_output=True,
-                        check=False,
-                    )
-                    self._last_git_fetch = now
-            else:
-                logger.debug(
-                    "Skipping changelog fetch for %.0f more seconds after EMFILE",
-                    self._git_fetch_backoff_until - now,
-                )
-
             current = repo.head.commit.hexsha
-            latest = next(
-                repo.iter_commits(f"origin/{version.branch}", max_count=1)
-            ).hexsha
-            commits = [*repo.iter_commits(f"HEAD..origin/{version.branch}")]
+            ref = f"origin/{version.branch}"
+            try:
+                latest = next(repo.iter_commits(ref, max_count=1)).hexsha
+                commits = [*repo.iter_commits(f"HEAD..{ref}")]
+            except Exception:
+                return current, current, False
 
             return (
                 current,
                 latest,
                 self._format_changelog(commits) if commits else False,
             )
+
+    async def _ensure_fork_remote(self) -> None:
+        """Point origin at this fork and fetch without resetting the worktree."""
+
+        def _sync():
+            with git.Repo() as repo:
+                desired = (self.config["GIT_ORIGIN_URL"] or self.FORK_ORIGIN).rstrip("/")
+                try:
+                    origin = repo.remote("origin")
+                except ValueError:
+                    origin = repo.create_remote("origin", desired)
+                current = (origin.url or "").rstrip("/")
+                if current.removesuffix(".git") != desired.removesuffix(".git"):
+                    logger.info("Pointing origin at %s", desired)
+                    origin.set_url(desired)
+                subprocess.run(
+                    ["git", "fetch", "--quiet", "origin"],
+                    cwd=repo.working_dir,
+                    timeout=60,
+                    capture_output=True,
+                    check=False,
+                )
+
+        await asyncio.wait_for(asyncio.to_thread(_sync), timeout=90)
 
     def get_changelog(self) -> str | typing.Literal[False]:
         if NO_GIT:
@@ -193,118 +212,6 @@ class UpdaterMod(loader.Module):
                 ).hexsha
         except Exception:
             return ""
-
-    @loader.loop(interval=60, autostart=True)
-    async def poller_announcement(self):
-        async with aiohttp.ClientSession() as session:
-            try:
-                url = "https://api.github.com/repos/Heroku-userbot/assets/contents/announcment.txt"
-                r = await session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    headers={"Accept": "application/vnd.github.v3.raw"},
-                )
-
-                match r.status:
-                    case 200:
-                        announcement = (await r.text()).strip()
-                        previous = self.get("announcement", "")
-                        if announcement and announcement != previous:
-                            await self.inline.bot.send_message(
-                                self.tg_id,
-                                self.strings["announcement"].format(announcement),
-                            )
-                            self.set("announcement", announcement)
-                    case _:
-                        pass
-            except Exception:
-                pass
-
-    @loader.loop(interval=60, autostart=True)
-    async def poller(self):
-        if NO_GIT:
-            return
-        try:
-            current, self._pending, changelog = self._get_update_state()
-        except Exception as e:
-            self._log_git_poll_error(e)
-            return
-
-        if (
-            self.config["disable_notifications"] and not self.config["autoupdate"]
-        ) or not changelog:
-            return
-
-        if (
-            self.get("ignore_permanent", False)
-            and self.get("ignore_permanent") == self._pending
-        ):
-            await asyncio.sleep(60)
-            return
-
-        if self._pending not in {current, self._notified}:
-            if not self.config["autoupdate"]:
-                manual_update = True
-            else:
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        r = await session.get(
-                            url=f"https://api.github.com/repos/Heroku-userbot/Heroku/contents/heroku/version.py?ref={version.branch}",
-                            headers={"Accept": "application/vnd.github.v3.raw"},
-                        )
-                        text = await r.text()
-
-                    new_version = ""
-                    for line in text.splitlines():
-                        if line.strip().startswith("__version__"):
-                            new_version = ast.literal_eval(line.split("=")[1])
-
-                    if version.__version__[0] == new_version[0]:
-                        manual_update = False
-                    else:
-                        logger.info("Got a major update, updating manually")
-                        manual_update = True
-                except Exception:
-                    manual_update = True
-
-            if manual_update:
-                m = await self.inline.bot.send_photo(
-                    self.tg_id,
-                    "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/updated.jpg",
-                    caption=self.strings["update_required"].format(
-                        current[:6],
-                        '<a href="https://github.com/Heroku-userbot/Heroku/compare/{}...{}">{}</a>'.format(
-                            current[:12],
-                            self._pending[:12],
-                            self._pending[:6],
-                        ),
-                        changelog,
-                    ),
-                    reply_markup=self._markup(),
-                )
-
-                self._notified = self._pending
-                self.set("ignore_permanent", False)
-
-                await self._delete_all_upd_messages()
-
-                self.set("upd_msg", m.message_id)
-
-            else:
-                m = await self.inline.bot.send_photo(
-                    self.tg_id,
-                    "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/updated.jpg",
-                    caption=self.strings["autoupdate_notifier"].format(
-                        self._pending[:6],
-                        changelog,
-                        '<a href="https://github.com/Heroku-userbot/Heroku/compare/{}...{}">{}</a>'.format(
-                            current[:12],
-                            self._pending[:12],
-                            "🔎 diff",
-                        ),
-                    ),
-                )
-                await self.invoke("update", "-f", peer=self.inline.bot_username)
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
@@ -494,6 +401,12 @@ class UpdaterMod(loader.Module):
             if client is not message.client:
                 await client.disconnect()
 
+        for client in self.allclients:
+            db = getattr(client, "heroku_db", None)
+            if db is not None and hasattr(db, "flush"):
+                with contextlib.suppress(Exception):
+                    await db.flush()
+
         await message.client.disconnect()
         restart()
 
@@ -502,7 +415,15 @@ class UpdaterMod(loader.Module):
             try:
                 with Repo(os.path.dirname(utils.get_base_dir())) as repo:
                     origin = repo.remote("origin")
+                    desired = (
+                        self.config["GIT_ORIGIN_URL"] or self.FORK_ORIGIN
+                    ).rstrip("/")
+                    current = (origin.url or "").rstrip("/")
+                    if current.removesuffix(".git") != desired.removesuffix(".git"):
+                        logger.info("Pointing origin at %s", desired)
+                        origin.set_url(desired)
                     logger.debug("Fetching updates from %s", origin.url)
+                    # Merge the tracking branch. Do not hard-reset to a foreign master.
                     r = origin.pull()
                     new_commit = repo.head.commit
                     for info in r:
@@ -561,6 +482,10 @@ class UpdaterMod(loader.Module):
             )
             return
         try:
+            await self._ensure_fork_remote()
+        except Exception:
+            logger.exception("Update fetch failed")
+        try:
             args = utils.get_args_raw(message)
             current = utils.get_git_hash() or ""
             with git.Repo() as repo:
@@ -600,14 +525,9 @@ class UpdaterMod(loader.Module):
 
     @loader.command()
     async def autoupdate(self, message: Message):
-        """| switch autoupdate state"""
-        self.config["autoupdate"] = not self.config["autoupdate"]
-        if self.config["autoupdate"]:
-            await utils.answer(message, self.strings["autoupdate_on"])
-        else:
-            await utils.answer(
-                message, self.strings["autoupdate_off"].format(prefix=self.get_prefix())
-            )
+        """| background autoupdate is disabled in this fork"""
+        self.config["autoupdate"] = False
+        await utils.answer(message, self.strings["autoupdate_disabled"])
 
     async def inline_update(
         self,
@@ -673,32 +593,8 @@ class UpdaterMod(loader.Module):
             self.set("do_not_create", True)
 
     async def inline_ready(self):
-        if not self.config["autoupdate"] and not self.get("autoupdate_answered", False):
-            await self.inline.bot.send_photo(
-                self.tg_id,
-                photo="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/unit_alpha.jpg",
-                caption=self.strings["autoupdate"],
-                reply_markup=self.inline.generate_markup(
-                    [
-                        [
-                            {
-                                "text": "✅ Turn on",
-                                "callback": self._set_autoupdate_state,
-                                "args": (True,),
-                                "style": "success",
-                            }
-                        ],
-                        [
-                            {
-                                "text": "🚫 Turn off",
-                                "callback": self._set_autoupdate_state,
-                                "args": (False,),
-                                "style": "danger",
-                            }
-                        ],
-                    ]
-                ),
-            )
+        # Background update polling and the autoupdate prompt are intentionally off.
+        return
 
     async def _add_folder(self):
         folders = await self._client(GetDialogFiltersRequest())

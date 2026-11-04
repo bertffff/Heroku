@@ -111,8 +111,6 @@ class CommandDispatcher:
             self._ratelimit_storage_user[message.sender_id] = user
             if user > self._ratelimit_max_user:
                 ret = False
-            else:
-                self._ratelimit_storage_chat[message.chat_id] = chat
 
             _decrement_ratelimit(
                 self._ratelimit_max_user * severity,
@@ -126,6 +124,7 @@ class CommandDispatcher:
             )
 
         chat += severity
+        self._ratelimit_storage_chat[message.chat_id] = chat
 
         if chat > self._ratelimit_max_chat:
             ret = False
@@ -347,9 +346,9 @@ class CommandDispatcher:
         ):
             return False
 
-        blacklist_chats = self._db.get(main.__name__, "blacklist_chats", [])
-        whitelist_chats = self._db.get(main.__name__, "whitelist_chats", [])
-        whitelist_modules = self._db.get(main.__name__, "whitelist_modules", [])
+        blacklist_chats = self._db.get_readonly(main.__name__, "blacklist_chats", [])
+        whitelist_chats = self._db.get_readonly(main.__name__, "whitelist_chats", [])
+        whitelist_modules = self._db.get_readonly(main.__name__, "whitelist_modules", [])
 
         if (chat_id := utils.get_chat_id(message)) in blacklist_chats or (
             whitelist_chats and chat_id not in whitelist_chats
@@ -381,12 +380,12 @@ class CommandDispatcher:
             pass
         elif (
             not event.is_private
-            and not self._db.get(main.__name__, "no_nickname", False)
-            and command not in self._db.get(main.__name__, "nonickcmds", [])
-            and initiator not in self._db.get(main.__name__, "nonickusers", [])
+            and not self._db.get_readonly(main.__name__, "no_nickname", False)
+            and command not in self._db.get_readonly(main.__name__, "nonickcmds", [])
+            and initiator not in self._db.get_readonly(main.__name__, "nonickusers", [])
             and not self.security.check_tsec(initiator, command)
             and utils.get_chat_id(event)
-            not in self._db.get(main.__name__, "nonickchats", [])
+            not in self._db.get_readonly(main.__name__, "nonickchats", [])
         ):
             return False
 
@@ -458,7 +457,7 @@ class CommandDispatcher:
             return False
 
         if (
-            self._db.get(main.__name__, "grep", False)
+            self._db.get_readonly(main.__name__, "grep", False)
             and not watcher
             and getattr(func.__self__.__class__, "__name__", "") != "TerminalMod"
         ):
@@ -582,7 +581,7 @@ class CommandDispatcher:
                     )
                 )
         else:
-            if not self._db.get(main.__name__, "inlinelogs", True):
+            if not self._db.get_readonly(main.__name__, "inlinelogs", True):
                 txt = (
                     "<tg-emoji emoji-id=5877477244938489129>🚫</tg-emoji><b> Call</b>"
                     f" <code>{utils.escape_html(message.message)}</code><b>"
@@ -642,17 +641,18 @@ class CommandDispatcher:
         """Handle all incoming messages"""
         message = utils.censor(getattr(event, "message", event))
 
-        blacklist_chats = self._db.get(main.__name__, "blacklist_chats", [])
-        whitelist_chats = self._db.get(main.__name__, "whitelist_chats", [])
-        whitelist_modules = self._db.get(main.__name__, "whitelist_modules", [])
+        blacklist_chats = self._db.get_readonly(main.__name__, "blacklist_chats", [])
+        whitelist_chats = self._db.get_readonly(main.__name__, "whitelist_chats", [])
+        whitelist_modules = self._db.get_readonly(main.__name__, "whitelist_modules", [])
 
         if (chat_id := utils.get_chat_id(message)) in blacklist_chats or (
             whitelist_chats and chat_id not in whitelist_chats
         ):
             logger.debug("Message is blocklisted")
+            return
 
         for func in self._modules.watchers:
-            bl = self._db.get(main.__name__, "disabled_watchers", {})
+            bl = self._db.get_readonly(main.__name__, "disabled_watchers", {})
             modname = str(func.__self__.__class__.strings["name"])
 
             if (

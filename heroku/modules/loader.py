@@ -70,7 +70,27 @@ class ModuleInstallError(RuntimeError):
 class LoaderMod(loader.Module):
     """Loads modules"""
 
-    strings = {"name": "Loader"}
+    strings = {
+        "name": "Loader",
+        "install_confirm": (
+            "<b>This module wants to install {0}:</b>\n{1}\n\n"
+            "<b>Install only if you trust this module.</b>"
+        ),
+        "install_confirm_needed": (
+            "<b>Refusing to install {0} without confirmation:</b> <code>{1}</code>"
+        ),
+        "install_denied": "<b>Installation cancelled.</b>",
+    }
+    strings_ru = {
+        "install_confirm": (
+            "<b>Модуль хочет установить {0}:</b>\n{1}\n\n"
+            "<b>Ставьте это только если доверяете модулю.</b>"
+        ),
+        "install_confirm_needed": (
+            "<b>Без подтверждения не устанавливаю {0}:</b> <code>{1}</code>"
+        ),
+        "install_denied": "<b>Установка отменена.</b>",
+    }
 
     def __init__(self):
         self.fully_loaded = False
@@ -186,7 +206,8 @@ class LoaderMod(loader.Module):
                 delattr(lib.config._config[option], "_save_marker")
                 lib._lib_pointer("__config__", {})[option] = config.value
 
-        self._db.save()
+        # Pointer writes mark the database dirty. Flush is debounced and also
+        # runs on shutdown, so this loop must not dump the file every tick.
 
     def update_modules_in_db(self):
         if self.allmodules.secure_boot:
@@ -701,7 +722,76 @@ class LoaderMod(loader.Module):
             photo="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/joined_jr.jpg",
         )
 
-    async def install_requirements(self, requirements: list):
+    async def _confirm_install(self, message, kind: str, items: list) -> bool:
+        """Ask the owner before pip or system packages are installed."""
+        items = [str(item) for item in items if str(item).strip()]
+        if not items:
+            return True
+
+        approved = set(self.get(f"approved_{kind}", []) or [])
+        if set(items) <= approved:
+            return True
+
+        listing = " ".join(utils.escape_html(item) for item in items)
+        if not isinstance(message, Message) or not self.inline.init_complete:
+            logger.warning("Refusing unconfirmed %s install: %s", kind, items)
+            if isinstance(message, Message):
+                await utils.answer(
+                    message,
+                    self.strings["install_confirm_needed"].format(kind, listing),
+                )
+            return False
+
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        async def _allow(call: InlineCall):
+            if not future.done():
+                future.set_result(True)
+
+        async def _deny(call: InlineCall):
+            if not future.done():
+                future.set_result(False)
+            await utils.answer(call, self.strings["install_denied"])
+
+        shown = await self.inline.form(
+            message=message,
+            text=self.strings["install_confirm"].format(
+                kind,
+                "\n".join(
+                    f"• <code>{utils.escape_html(item)}</code>" for item in items
+                ),
+            ),
+            reply_markup=[
+                {"text": "✅", "callback": _allow},
+                {"text": "❌", "callback": _deny},
+            ],
+        )
+        if not shown:
+            await utils.answer(
+                message,
+                self.strings["install_confirm_needed"].format(kind, listing),
+            )
+            return False
+
+        try:
+            allowed = await asyncio.wait_for(future, timeout=180)
+        except asyncio.TimeoutError:
+            allowed = False
+
+        if not allowed:
+            return False
+
+        self.set(f"approved_{kind}", sorted(approved | set(items)))
+        return True
+
+    async def install_requirements(self, requirements: list, *, confirmed: bool = False):
+        if not confirmed:
+            logger.error(
+                "Refusing pip install without confirmation: %s",
+                requirements,
+            )
+            return False
         is_venv = hasattr(sys, "real_prefix") or sys.prefix != getattr(
             sys, "base_prefix", sys.prefix
         )
@@ -744,7 +834,16 @@ class LoaderMod(loader.Module):
 
         return True
 
-    async def install_packages(self, packages: list):
+    async def install_packages(self, packages: list, *, confirmed: bool = False):
+        if not confirmed:
+            logger.error(
+                "Refusing system package install without confirmation: %s",
+                packages,
+            )
+            return False
+        if os.environ.get("NO_SUDO") == "1" and os.geteuid() != 0:
+            logger.error("NO_SUDO is set; refusing a privileged package install")
+            return False
         try:
             is_root = os.geteuid() == 0
 
@@ -792,6 +891,9 @@ class LoaderMod(loader.Module):
                 cmd = ["brew", "install", *packages]
 
             if not is_root and shutil.which("sudo"):
+                if os.environ.get("NO_SUDO") == "1":
+                    logger.error("NO_SUDO is set; not invoking sudo")
+                    return False
                 cmd = ["sudo", *cmd]
 
             utils.ensure_child_watcher()
@@ -908,7 +1010,11 @@ class LoaderMod(loader.Module):
                 pass
 
             if requirements:
-                result = await self.install_requirements(requirements)
+                if not await self._confirm_install(message, "pip", requirements):
+                    return False
+                result = await self.install_requirements(
+                    requirements, confirmed=True
+                )
                 if not result:
                     logger.error(
                         "Module %s requirements from #scope:requires failed to install: %s",
@@ -943,7 +1049,11 @@ class LoaderMod(loader.Module):
                 pass
 
             if packages:
-                result = await self.install_packages(packages)
+                if not await self._confirm_install(
+                    message, "system packages", packages
+                ):
+                    return False
+                result = await self.install_packages(packages, confirmed=True)
 
                 if not result:
                     logger.error(
@@ -1059,6 +1169,9 @@ class LoaderMod(loader.Module):
 
                     return False
 
+                if not await self._confirm_install(message, "pip", requirements):
+                    return False
+
                 if message is not None:
                     await utils.answer(
                         message,
@@ -1070,7 +1183,7 @@ class LoaderMod(loader.Module):
                         ),
                     )
 
-                result = await self.install_requirements(requirements)
+                result = await self.install_requirements(requirements, confirmed=True)
                 if not result:
                     logger.error(
                         "Module %s dependency installation failed: %s",

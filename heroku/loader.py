@@ -321,6 +321,57 @@ LOADED_MODULES_PATH.mkdir(parents=True, exist_ok=True)
 MODULES_LANGPACKS_PATH.mkdir(parents=True, exist_ok=True)
 
 
+OPTIONAL_CORE_MODULES = frozenset({"eval", "translate"})
+
+
+def _collect_optional_names(value) -> set[str]:
+    names: set[str] = set()
+    if isinstance(value, str):
+        names.update(
+            part.strip().removesuffix(".py")
+            for part in value.replace(";", ",").split(",")
+            if part.strip()
+        )
+    elif isinstance(value, (list, tuple, set)):
+        for part in value:
+            names.update(_collect_optional_names(str(part)))
+    return names
+
+
+def enabled_optional_modules(db=None) -> set[str]:
+    """Core modules that stay unloaded until the owner opts in."""
+    enabled = _collect_optional_names(os.environ.get("HEROKU_OPTIONAL_MODULES", ""))
+    try:
+        enabled.update(_collect_optional_names(main.get_config_key("optional_modules")))
+    except Exception:
+        pass
+    if db is not None:
+        getter = getattr(db, "get_readonly", None) or db.get
+        try:
+            enabled.update(
+                _collect_optional_names(getter("heroku.loader", "optional_modules", None))
+            )
+        except Exception:
+            pass
+    return enabled
+
+
+def _filter_optional_core(mods: list[str], db) -> list[str]:
+    enabled = enabled_optional_modules(db)
+    kept = []
+    for mod in mods:
+        name = os.path.basename(mod).rsplit(".", 1)[0]
+        if name in OPTIONAL_CORE_MODULES and name not in enabled:
+            logger.info(
+                "Skipping optional module %s. Enable it with optional_modules "
+                "or HEROKU_OPTIONAL_MODULES",
+                name,
+            )
+            continue
+        kept.append(mod)
+    return kept
+
+
 def _iter_module_files(
     directory: str | Path,
     *,
@@ -640,7 +691,10 @@ class Modules:
         external_mods = []
 
         if not mods:
-            mods = _iter_module_files(os.path.join(utils.get_base_dir(), MODULES_NAME))
+            mods = _filter_optional_core(
+                _iter_module_files(os.path.join(utils.get_base_dir(), MODULES_NAME)),
+                self._db,
+            )
 
             self.secure_boot = self._db.get(__name__, "secure_boot", False)
 
@@ -716,52 +770,9 @@ class Modules:
             else None
         )
 
-        async def _exec_module():
-            attempted = False
-            while True:
-                try:
-                    spec.loader.exec_module(module)
-                    break
-                except ImportError as e:
-                    if not spec.loader.data or attempted:
-                        raise
-
-                    data = spec.loader.data
-                    if isinstance(data, bytes):
-                        data = data.decode("utf-8", errors="ignore")
-
-                    match = VALID_PIP_PACKAGES.search(data)
-                    if not match:
-                        raise
-
-                    requirements = list(
-                        filter(
-                            lambda x: not x.startswith(("-", "_", ".")),
-                            map(
-                                str.strip,
-                                match.group(1).split(),
-                            ),
-                        )
-                    )
-
-                    exc_name = (getattr(e, "name", None) or "").lower()
-
-                    requirements.extend(
-                        [IMPORT_PIP_ALIASES.get(exc_name, exc_name or e.name or "")]
-                    )
-
-                    result = await self.lookup("LoaderMod").install_requirements(
-                        requirements
-                    )
-
-                    importlib.invalidate_caches()
-
-                    if not result:
-                        raise
-
-                    attempted = True
-
-        await _exec_module()
+        # Missing imports are installed by LoaderMod after an explicit confirm.
+        # Do not pip-install from here: that path has no owner prompt.
+        spec.loader.exec_module(module)
 
         ret = None
 

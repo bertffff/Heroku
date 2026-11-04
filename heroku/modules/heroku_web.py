@@ -43,10 +43,15 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class HerokuWebMod(loader.Module):
-    """Inline account management"""
+    """Inline account management.
+
+    This module does not open an HTTP listener. Account login stays in inline
+    forms and is owner-only. There is no eval or terminal passthrough.
+    """
 
     strings = {"name": "HerokuAccounts"}
 
+    @loader.owner
     @loader.command()
     async def addacc(self, message: Message):
         if "JAMHOST" in os.environ:
@@ -164,7 +169,7 @@ class HerokuWebMod(loader.Module):
             proxy=main.heroku.proxy,
             connection_retries=None,
             device_model=main.get_app_name(),
-            system_version="Windows 10",
+            system_version=main.generate_random_system_version(),
             app_version=".".join(map(str, __version__)) + " x64",
             lang_code="en",
             system_lang_code="en-US",
@@ -487,6 +492,7 @@ class HerokuWebMod(loader.Module):
 
         asyncio.ensure_future(self.schedule_restart(call, client, is_switch=is_switch))
 
+    @loader.owner
     @loader.command()
     async def switchacc(self, message: Message):
         if "JAMHOST" in os.environ:
