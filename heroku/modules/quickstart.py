@@ -119,7 +119,7 @@ class Quickstart(loader.Module):
                 except Exception:
                     logger.exception(f"Failed to create/verify topic '{topic_title}'")
 
-            await utils.invite_inline_bot(self.client, content_channel)
+            await utils.invite_inline_bot_or_skip(self.client, content_channel)
 
         except Exception:
             logger.exception(

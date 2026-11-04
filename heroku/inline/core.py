@@ -59,6 +59,7 @@ from herokutl.utils import get_display_name
 from .. import main, utils
 from ..types import InlineDownError
 from ..database import Database
+from ..network import client_transport
 from ..tl_cache import CustomTelegramClient
 from ..translations import Translator
 from .bot_pm import BotPM
@@ -284,12 +285,22 @@ class InlineManager(
 
         bot_uid = self._token.split(":", 1)[0]
         self._cleanup_stale_bot_sessions(bot_uid)
+        # The user client may already be on obfuscated WSS (raw DC TCP blocked).
+        # The bot must use that same connection class and proxy, or it never
+        # comes up and bot_username stays unset.
+        connection, proxy = client_transport(self._client)
+        logger.info(
+            "Inline bot transport: %s",
+            getattr(connection, "__name__", connection),
+        )
         self._bot_client = TelegramClient(
             SQLiteSession(
                 os.path.join(main.SESSIONS_DIR, f"heroku-{self._me}-bot-{bot_uid}")
             ),
             self._client.api_id,
             self._client.api_hash,
+            connection=connection,
+            proxy=proxy,
             receive_updates=True,
         )
 

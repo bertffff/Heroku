@@ -64,7 +64,7 @@ from herokutl.tl.types import (
 from .._internal import fw_protect
 from ..tl_cache import CustomTelegramClient
 from ..types import Module
-from .other import invite_inline_bot, run_sync
+from .other import inline_bot_username, invite_inline_bot_or_skip, run_sync
 
 FormattingEntity = typing.Union[
     MessageEntityUnknown,
@@ -296,14 +296,16 @@ async def asset_channel(
         ):
             client._channels_cache[title] = {"peer": d.entity, "exp": int(time.time())}
             if invite_bot:
-                if all(
+                if not inline_bot_username(client):
+                    await invite_inline_bot_or_skip(client, d.entity)
+                elif all(
                     participant.id != client.loader.inline.bot_id
                     for participant in await client.get_participants(
                         d.entity, limit=100
                     )
                 ):
                     await fw_protect()
-                    await invite_inline_bot(client, d.entity)
+                    await invite_inline_bot_or_skip(client, d.entity)
 
             return d.entity, False
 
@@ -322,8 +324,9 @@ async def asset_channel(
     ).chats[0]
 
     if invite_bot:
-        await fw_protect()
-        await invite_inline_bot(client, peer)
+        if inline_bot_username(client):
+            await fw_protect()
+        await invite_inline_bot_or_skip(client, peer)
 
     if silent:
         await fw_protect()
@@ -467,13 +470,16 @@ async def asset_forum_topic(
         forums_cache.setdefault(entity.title, {})[title] = new_topic.id
 
     if invite_bot:
-        await fw_protect()
-        if all(
-            p.id != client.loader.inline.bot_id
-            for p in await client.get_participants(entity, limit=20)
-        ):
+        if not inline_bot_username(client):
+            await invite_inline_bot_or_skip(client, entity)
+        else:
             await fw_protect()
-            await invite_inline_bot(client, entity)
+            if all(
+                p.id != client.loader.inline.bot_id
+                for p in await client.get_participants(entity, limit=20)
+            ):
+                await fw_protect()
+                await invite_inline_bot_or_skip(client, entity)
 
     return new_topic
 

@@ -32,6 +32,32 @@ parser = herokutl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
 
 
+class InlineBotNotReady(RuntimeError):
+    """
+    Inline bot has no username, so it cannot be invited or resolved as a peer.
+
+    Raised instead of letting Telethon cast ``None`` to a peer. The inline
+    manager did not finish starting (often because the bot client could not
+    reach Telegram).
+    """
+
+
+def inline_bot_username(client) -> str | None:
+    """
+    Username of the running inline bot, without ``@``.
+
+    ``None`` when inline is missing or the bot client never finished starting.
+    """
+    loader = getattr(client, "loader", None)
+    inline = getattr(loader, "inline", None)
+    username = getattr(inline, "bot_username", None)
+    if not isinstance(username, str):
+        return None
+
+    username = username.strip().lstrip("@").strip()
+    return username or None
+
+
 def ensure_child_watcher():
     """Ensure the active asyncio policy can spawn subprocesses."""
     if sys.platform == "win32" or sys.version_info >= (3, 14):
@@ -74,11 +100,19 @@ async def invite_inline_bot(
     :param client: Client to use
     :param peer: Peer to invite bot to
     :return: None
+    :raise InlineBotNotReady: If the inline bot username is missing
     :raise RuntimeError: If error occurred while inviting bot
     """
+    username = inline_bot_username(client)
+    if not username:
+        raise InlineBotNotReady(
+            "Inline bot is not ready (bot username is missing), so it was not "
+            "invited. The inline manager did not finish starting; a missing "
+            "username cannot be resolved to a Telegram peer."
+        )
 
     try:
-        await client(InviteToChannelRequest(peer, [client.loader.inline.bot_username]))
+        await client(InviteToChannelRequest(peer, [username]))
     except Exception as e:
         raise RuntimeError(
             f"Can't invite inline bot to old asset chat, which is required by module: {e}"
@@ -88,11 +122,30 @@ async def invite_inline_bot(
         await client(
             EditAdminRequest(
                 channel=peer,
-                user_id=client.loader.inline.bot_username,
+                user_id=username,
                 admin_rights=ChatAdminRights(ban_users=True),
                 rank="Heroku",
             )
         )
+
+
+async def invite_inline_bot_or_skip(
+    client: CustomTelegramClient,
+    peer: hints.EntityLike,
+) -> bool:
+    """
+    Invite the inline bot, or skip when inline is not ready.
+
+    Real invite failures still raise. A missing username is logged and ignored
+    so channel setup can finish instead of failing on a ``None`` peer.
+    :return: ``True`` when the invite was attempted
+    """
+    try:
+        await invite_inline_bot(client, peer)
+    except InlineBotNotReady as exc:
+        logger.warning("%s", exc)
+        return False
+    return True
 
 
 def run_sync(func, *args, **kwargs):
