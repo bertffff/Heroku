@@ -174,6 +174,31 @@ python3 -m heroku
 
 
 
+## 🌐 MTProto transport (filtered networks)
+
+Some networks allow HTTPS to `*.web.telegram.org` and block raw MTProto TCP to `149.154.*`. Heroku can run the same obfuscated abridged MTProto framing as `ConnectionTcpObfuscated` over `wss://<dc>.web.telegram.org/apiws` (`Sec-WebSocket-Protocol: binary`, `Origin: https://web.telegram.org`).
+
+| Mode | How to select | Behavior |
+|------|----------------|----------|
+| `auto` (default) | omit `--transport`, or `HEROKU_TRANSPORT=auto` | WebSocket when `SAND_EGRESS_TUNNEL_PROXY_ADDR` is set, or when `http://127.0.0.1:8791` accepts connections. Otherwise TCP full (`ConnectionTcpFull`). |
+| `ws` | `--transport ws` or `HEROKU_TRANSPORT=ws` | Always the obfuscated WebSocket transport. Uses that egress address as an HTTP CONNECT (or SOCKS) proxy when it is set; if the local tunnel port is open and the variable is unset, uses `http://127.0.0.1:8791`; otherwise connects directly. |
+| `tcp` | `--transport tcp` or `HEROKU_TRANSPORT=tcp` | Always `ConnectionTcpFull`. |
+
+`--proxy-host`, `--proxy-port`, `--proxy-secret`, and `--type-proxy` (`mtproxy`, `socks5`, `http`) are unchanged and take priority over `--transport`.
+
+```bash
+# Force the WebSocket transport
+HEROKU_TRANSPORT=ws python3 -m heroku
+
+# Auto: WebSocket only when the egress tunnel is configured
+SAND_EGRESS_TUNNEL_PROXY_ADDR=http://127.0.0.1:8791 python3 -m heroku
+
+# Force the historical direct TCP connection
+python3 -m heroku --transport tcp
+```
+
+Web DC hosts: 1 `pluto`, 2 `venus`, 3 `aurora`, 4 `vesta`, 5 `flora`.
+
 ## Additional Features
 
 <details>

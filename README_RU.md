@@ -172,6 +172,26 @@ sudo apt update ; sudo apt upgrade -y ; sudo apt install -y python3 python3-venv
 
 
 
+## 🌐 Транспорт MTProto (фильтруемые сети)
+
+Если HTTPS до `*.web.telegram.org` доступен, а прямой MTProto TCP до `149.154.*` блокируется, Heroku может говорить обфусцированным abridged MTProto (как `ConnectionTcpObfuscated`) через `wss://<dc>.web.telegram.org/apiws` (`Sec-WebSocket-Protocol: binary`, `Origin: https://web.telegram.org`).
+
+| Режим | Как включить | Поведение |
+|------|----------------|----------|
+| `auto` (по умолчанию) | не указывать `--transport` или `HEROKU_TRANSPORT=auto` | WebSocket, если задан `SAND_EGRESS_TUNNEL_PROXY_ADDR` или `http://127.0.0.1:8791` принимает соединения. Иначе обычный TCP (`ConnectionTcpFull`). |
+| `ws` | `--transport ws` или `HEROKU_TRANSPORT=ws` | Всегда WebSocket. Прокси берётся из `SAND_EGRESS_TUNNEL_PROXY_ADDR` (HTTP CONNECT или SOCKS); если переменная пуста, но локальный туннель слушает порт, используется `http://127.0.0.1:8791`; иначе прямое WSS. |
+| `tcp` | `--transport tcp` или `HEROKU_TRANSPORT=tcp` | Всегда `ConnectionTcpFull`. |
+
+`--proxy-host`, `--proxy-port`, `--proxy-secret` и `--type-proxy` (`mtproxy`, `socks5`, `http`) работают как раньше и важнее `--transport`.
+
+```bash
+HEROKU_TRANSPORT=ws python3 -m heroku
+SAND_EGRESS_TUNNEL_PROXY_ADDR=http://127.0.0.1:8791 python3 -m heroku
+python3 -m heroku --transport tcp
+```
+
+Хосты DC: 1 `pluto`, 2 `venus`, 3 `aurora`, 4 `vesta`, 5 `flora`.
+
 ## Дополнительные функции
 
 <details>

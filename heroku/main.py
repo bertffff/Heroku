@@ -72,6 +72,14 @@ from ._internal import (
     register_secrets,
 )
 from .dispatcher import CommandDispatcher
+from .network import (
+    ConnectionWsObfuscated,
+    cli_transport_default,
+    decide_connection_mode,
+    egress_proxy_url,
+    normalize_transport_name,
+    redact_proxy_url,
+)
 from .qr import QRCode
 from .secure import patcher
 from .tl_cache import CustomTelegramClient
@@ -310,6 +318,22 @@ def parse_arguments() -> dict:
         help="MTProto proxy secret; required for --type-proxy mtproxy",
     )
     parser.add_argument(
+        "--transport",
+        dest="transport",
+        choices=("auto", "tcp", "ws"),
+        default=cli_transport_default(),
+        type=str.lower,
+        help=(
+            "MTProto transport. auto (default, or HEROKU_TRANSPORT): "
+            "obfuscated WebSocket when SAND_EGRESS_TUNNEL_PROXY_ADDR is set "
+            "or http://127.0.0.1:8791 accepts connections, otherwise TCP full. "
+            "ws: always wss://<dc>.web.telegram.org/apiws (HTTP CONNECT when "
+            "that egress proxy is present, direct WSS otherwise). "
+            "tcp: always ConnectionTcpFull. "
+            "Ignored when --proxy-host/--proxy-port/--proxy-secret is set."
+        ),
+    )
+    parser.add_argument(
         "--root",
         dest="disable_root_check",
         action="store_true",
@@ -426,10 +450,37 @@ class Heroku:
         port = self.arguments.proxy_port
         secret = self.arguments.proxy_secret
         proxy_type = (self.arguments.proxy_type or "mtproxy").lower()
+        transport = normalize_transport_name(getattr(self.arguments, "transport", None))
 
         if not host and not port and not secret:
+            egress = None if transport == "tcp" else egress_proxy_url()
+            mode = decide_connection_mode(
+                transport,
+                proxy_host=host,
+                proxy_port=port,
+                proxy_secret=secret,
+                egress_url=egress,
+            )
+            if mode == "ws":
+                if egress:
+                    logging.info(
+                        "MTProto transport: obfuscated WebSocket via %s",
+                        redact_proxy_url(egress),
+                    )
+                else:
+                    logging.info("MTProto transport: obfuscated WebSocket (direct WSS)")
+                self.proxy, self.conn = None, ConnectionWsObfuscated
+                return
+
+            logging.info("MTProto transport: TCP full")
             self.proxy, self.conn = None, ConnectionTcpFull
             return
+
+        if transport == "ws":
+            logging.warning(
+                "Proxy flags are set, so Heroku is using the %s proxy from --proxy-host",
+                proxy_type,
+            )
 
         if not host or not port:
             raise ValueError("--proxy-host and --proxy-port must be passed together")
