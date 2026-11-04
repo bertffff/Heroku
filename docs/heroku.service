@@ -1,0 +1,22 @@
+[Unit]
+Description=Heroku userbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=heroku
+Group=heroku
+WorkingDirectory=/opt/heroku
+Environment=HEROKU_TRANSPORT=auto
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/heroku/account.env
+ExecStart=/opt/heroku/.venv/bin/python -m heroku --data-root /var/lib/heroku
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

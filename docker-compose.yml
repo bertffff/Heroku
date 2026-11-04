@@ -1,15 +1,23 @@
 services:
-  worker:
-    container_name: heroku_ub
+  heroku:
     build:
       context: .
+    image: heroku:local
+    environment:
+      HEROKU_TRANSPORT: ${HEROKU_TRANSPORT:-auto}
+      # Empty values are ignored. Put api_id and api_hash in a .env file
+      # next to this compose file, or log in once and leave them in
+      # config.json on the volume. Do not bake them into the image.
+      api_id: ${api_id:-}
+      api_hash: ${api_hash:-}
     volumes:
-      - worker:/data
-    stop_signal: SIGINT
+      - heroku-data:/data
     restart: unless-stopped
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 30s
     stdin_open: true
     tty: true
-    init: true
 
 volumes:
-  worker:
+  heroku-data:

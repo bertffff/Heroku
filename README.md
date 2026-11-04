@@ -199,6 +199,8 @@ python3 -m heroku --transport tcp
 
 Web DC hosts: 1 `pluto`, 2 `venus`, 3 `aurora`, 4 `vesta`, 5 `flora`.
 
+The WebSocket transport sends keepalive pings so an idle proxy is less likely to drop the socket, and a clean close reconnects without a warning. See [docs/DEPLOY.md](docs/DEPLOY.md) for a VPS or Docker setup of this fork (`HEROKU_TRANSPORT`, one process per account, manual `.update`).
+
 ## Additional Features
 
 <details>

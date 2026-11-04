@@ -192,6 +192,8 @@ python3 -m heroku --transport tcp
 
 Хосты DC: 1 `pluto`, 2 `venus`, 3 `aurora`, 4 `vesta`, 5 `flora`.
 
+WebSocket шлёт keepalive, чтобы прокси реже рвал простой сокет, а чистое закрытие переподключается без предупреждения в логе. Деплой этого форка на VPS или в Docker: [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Дополнительные функции
 
 <details>
