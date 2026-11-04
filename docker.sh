@@ -1,6 +1,6 @@
 #!/bin/bash
 
-eval "git clone https://github.com/Heroku-userbot/Heroku"
+git clone https://github.com/bertffff/Heroku.git
 cd Heroku
 
 touch heroku-install.log
@@ -46,4 +46,4 @@ sudo docker-compose build 1>heroku-install.log 2>&1
 printf "\033[0;32m - success\e[0m\n"
 
 printf "\033[0;32mStarting Heroku setup in console mode...\e[0m\n"
-sudo docker-compose run --rm worker
+sudo docker-compose run --rm heroku

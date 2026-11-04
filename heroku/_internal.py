@@ -112,6 +112,7 @@ def private_write(path, data):
             file.flush()
             os.fsync(file.fileno())
         os.replace(temporary, path)
+        os.chmod(path, 0o600)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

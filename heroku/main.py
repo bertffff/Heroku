@@ -406,6 +406,23 @@ def raise_auth():
     raise InteractiveAuthRequired()
 
 
+def api_credentials_from_environ(
+    environ: typing.Mapping[str, str] | None = None,
+) -> tuple[str, str] | None:
+    """Non-empty API id and hash from the environment, or nothing.
+
+    Blank values are ignored so an empty compose variable does not override
+    ``config.json``. ``api_id`` / ``api_hash`` win over ``API_ID`` / ``API_HASH``.
+    """
+    env = os.environ if environ is None else environ
+    for id_key, hash_key in (("api_id", "api_hash"), ("API_ID", "API_HASH")):
+        api_id = str(env.get(id_key) or "").strip()
+        api_hash = str(env.get(hash_key) or "").strip()
+        if api_id and api_hash:
+            return api_id, api_hash
+    return None
+
+
 class Heroku:
     """Main userbot instance, which can handle multiple clients"""
 
@@ -551,13 +568,11 @@ class Heroku:
             try:
                 from . import api_token
             except ImportError:
-                try:
-                    api_token = api_token_type(
-                        os.environ["api_id"],
-                        os.environ["api_hash"],
-                    )
-                except KeyError:
+                found = api_credentials_from_environ()
+                if found is None:
                     api_token = None
+                else:
+                    api_token = api_token_type(*found)
 
         self.api_token = api_token
 

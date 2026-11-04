@@ -12,13 +12,16 @@ import asyncio
 import inspect
 import logging
 import ssl as ssl_mod
+import time
 from urllib.parse import urlsplit
 
 import websockets
+from herokutl.errors import InvalidBufferError, InvalidChecksumError
 from herokutl.network.connection.connection import ObfuscatedConnection
 from herokutl.network.connection.tcpabridged import AbridgedPacketCodec
 from herokutl.network.connection.tcpobfuscated import ObfuscatedIO
 from python_socks.async_.asyncio import Proxy
+from websockets.exceptions import ConnectionClosed
 
 from .transport import (
     dc_host_was_known,
@@ -32,6 +35,15 @@ logger = logging.getLogger(__name__)
 # One MTProto packet is at most 16 MiB. Keep a little extra queued.
 _MAX_WS_MESSAGE = 16 * 1024 * 1024
 _MAX_BUFFER = 32 * 1024 * 1024
+# Shorter than common proxy and NAT idle timeouts (30–60s). Pongs are not
+# required: a datacenter that ignores WebSocket pings must not be dropped.
+WS_PING_INTERVAL = 20.0
+# A socket that dies before this has lived through a handshake only.
+# Longer closes (idle proxy, planned reconnect) retry immediately.
+WS_STABLE_UPTIME = 5.0
+WS_RECONNECT_BACKOFF_BASE = 1.0
+WS_RECONNECT_BACKOFF_CAP = 16.0
+WS_BACKOFF_MAX_STEP = 5
 _BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -44,6 +56,21 @@ _CONNECT_PARAMS = inspect.signature(websockets.connect).parameters
 def _connect_accepts(name: str) -> bool:
     param = _CONNECT_PARAMS.get(name)
     return param is not None and param.kind is not inspect.Parameter.VAR_KEYWORD
+
+
+def benign_socket_close(exc: BaseException) -> bool:
+    """True when the peer closed the socket without a partial MTProto packet.
+
+    Idle proxies and NAT timeouts surface as an empty read or a WebSocket
+    close frame. Those are reconnects, not protocol failures.
+    """
+    if isinstance(exc, asyncio.IncompleteReadError):
+        return len(exc.partial or b"") == 0
+    if isinstance(exc, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+        return True
+    if isinstance(exc, ConnectionClosed):
+        return True
+    return False
 
 
 class _WsByteReader:
@@ -100,8 +127,15 @@ class _WsByteWriter:
             self._pending.clear()
             try:
                 await self._ws.send(payload)
-            except Exception:
+            except OSError:
                 self._closing = True
+                raise
+            except Exception as exc:
+                self._closing = True
+                # websockets.ConnectionClosed is not an OSError. Telethon's
+                # send loop treats only OSError as a normal peer close.
+                if benign_socket_close(exc):
+                    raise ConnectionError("WebSocket closed") from exc
                 raise
 
     def close(self):
@@ -134,6 +168,8 @@ class ConnectionWsObfuscated(ObfuscatedConnection):
         self._ws_closed = asyncio.Event()
         self._pending_writes: list[bytes] = []
         self._close_lock = asyncio.Lock()
+        self._opened_at: float | None = None
+        self._backoff_step = 0
 
     def _websocket_target(self) -> tuple[str, str]:
         host = web_host_for_dc(self._dc_id)
@@ -189,9 +225,18 @@ class ConnectionWsObfuscated(ObfuscatedConnection):
         # ``proxy=None`` also stops websockets from picking up HTTPS_PROXY.
         if _connect_accepts("proxy"):
             kwargs["proxy"] = None
-        # Telethon already sends MTProto pings. A WebSocket ping timeout would
-        # drop a quiet datacenter connection that is otherwise healthy.
-        if _connect_accepts("ping_interval"):
+        # MTProto is already encrypted. permessage-deflate uses RSV bits that
+        # some egress proxies mishandle, and it does not help this traffic.
+        if _connect_accepts("compression"):
+            kwargs["compression"] = None
+        # Ping frames refresh proxy/NAT idle timers. A pong timeout must stay
+        # off: Telegram answers MTProto pings, not necessarily WebSocket pongs,
+        # and the previous ``ping_interval=None`` let idle proxies close the
+        # socket (logged as "0 bytes read").
+        if _connect_accepts("ping_interval") and _connect_accepts("ping_timeout"):
+            kwargs["ping_interval"] = WS_PING_INTERVAL
+            kwargs["ping_timeout"] = None
+        elif _connect_accepts("ping_interval"):
             kwargs["ping_interval"] = None
         return kwargs
 
@@ -243,6 +288,7 @@ class ConnectionWsObfuscated(ObfuscatedConnection):
         proxy_url = egress_proxy_url()
         via = f" via {redact_proxy_url(proxy_url)}" if proxy_url else ""
         logger.info("Opening obfuscated MTProto WebSocket to %s%s", uri, via)
+        await self._await_reconnect_backoff()
 
         sock = None
         try:
@@ -263,17 +309,29 @@ class ConnectionWsObfuscated(ObfuscatedConnection):
             self._pending_writes.clear()
             self._reader = _WsByteReader(self._buffer, self._buf_cond, self._ws_closed)
             self._writer = _WsByteWriter(self._ws, self._pending_writes)
+            self._opened_at = time.monotonic()
             self._recv_task_ws = asyncio.create_task(self._ws_recv_loop())
             self._codec = self.packet_codec(self)
             self._init_conn()
             await self._writer.drain()
-        except BaseException:
+        except asyncio.CancelledError:
             if sock is not None:
                 try:
                     sock.close()
                 except OSError:
                     pass
             await self._close_ws()
+            raise
+        except BaseException:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+            opened = self._opened_at is not None
+            await self._close_ws()
+            if not opened:
+                self._note_failed_open()
             raise
 
     async def _ws_recv_loop(self):
@@ -303,8 +361,40 @@ class ConnectionWsObfuscated(ObfuscatedConnection):
             async with self._buf_cond:
                 self._buf_cond.notify_all()
 
+    def _account_close(self) -> None:
+        opened = self._opened_at
+        self._opened_at = None
+        if opened is None:
+            return
+        lived = time.monotonic() - opened
+        if lived >= WS_STABLE_UPTIME:
+            self._backoff_step = 0
+            return
+        self._backoff_step = min(self._backoff_step + 1, WS_BACKOFF_MAX_STEP)
+
+    def _note_failed_open(self) -> None:
+        self._backoff_step = min(self._backoff_step + 1, WS_BACKOFF_MAX_STEP)
+
+    def _reconnect_delay(self) -> float:
+        step = self._backoff_step
+        if step <= 0:
+            return 0.0
+        delay = WS_RECONNECT_BACKOFF_BASE * (2 ** (step - 1))
+        return min(WS_RECONNECT_BACKOFF_CAP, delay)
+
+    async def _await_reconnect_backoff(self) -> None:
+        delay = self._reconnect_delay()
+        if delay <= 0:
+            return
+        logger.info(
+            "WebSocket reconnect backoff %.0fs after a short-lived connection",
+            delay,
+        )
+        await asyncio.sleep(delay)
+
     async def _close_ws(self):
         async with self._close_lock:
+            self._account_close()
             self._ws_closed.set()
             async with self._buf_cond:
                 self._buf_cond.notify_all()
@@ -330,7 +420,52 @@ class ConnectionWsObfuscated(ObfuscatedConnection):
                 except Exception:
                     logger.debug("WebSocket close failed", exc_info=True)
 
+    async def _recv_loop(self):
+        """Same queue protocol as Telethon, without a warning on idle EOF.
+
+        ``Connection._recv_loop`` logs every ``IncompleteReadError`` at
+        WARNING ("Server closed the connection: 0 bytes read..."). An egress
+        proxy closing an idle WebSocket is that exception with an empty
+        partial. Reconnect still happens: the error is queued and the sender
+        treats it as a dropped link.
+        """
+        try:
+            while self._connected:
+                try:
+                    data = await self._recv()
+                except asyncio.CancelledError:
+                    break
+                except (OSError, asyncio.IncompleteReadError) as exc:
+                    if benign_socket_close(exc):
+                        self._log.debug("WebSocket closed (%s); reconnecting", exc)
+                    else:
+                        self._log.warning("Server closed the connection: %s", exc)
+                    await self._recv_queue.put((None, exc))
+                    await self.disconnect()
+                except InvalidChecksumError as exc:
+                    self._log.warning("Server response had invalid checksum: %s", exc)
+                    await self._recv_queue.put((None, exc))
+                except InvalidBufferError as exc:
+                    self._log.warning("Server response had invalid buffer: %s", exc)
+                    await self._recv_queue.put((None, exc))
+                except Exception as exc:
+                    self._log.exception("Unexpected exception in the receive loop")
+                    await self._recv_queue.put((None, exc))
+                    await self.disconnect()
+                else:
+                    await self._recv_queue.put((data, None))
+        finally:
+            await self.disconnect()
+
     async def disconnect(self):
+        # Telethon cancels the receive task from inside that task. Awaiting
+        # the current task aborts this cleanup, so the WebSocket can stay
+        # half-open across the reconnect.
+        current = asyncio.current_task()
+        if current is not None and self._recv_task is current:
+            self._recv_task = None
+        if current is not None and self._send_task is current:
+            self._send_task = None
         try:
             await super().disconnect()
         finally:

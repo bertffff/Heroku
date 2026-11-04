@@ -2,41 +2,47 @@ FROM python:3.14
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=100 \
     DOCKER=true \
-    GIT_PYTHON_REFRESH=quiet
+    GIT_PYTHON_REFRESH=quiet \
+    HEROKU_TRANSPORT=auto
 
+# Runtime libraries the core and optional modules shell out to.
+# Node is only for the opt-in eval module. No SSH server, no third-party
+# install scripts, and no clone of a different GitHub remote: the image is
+# the checkout you build (docker build from this tree).
 RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential \
-    curl \
     ffmpeg \
-    gcc \
     git \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavformat-dev \
-    libavutil-dev \
     libcairo2 \
     libmagic1 \
-    libswscale-dev \
-    openssh-server \
-    xfonts-75dpi \
-    xfonts-base \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install --no-install-recommends -y nodejs \
+    nodejs \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && useradd --system --create-home --uid 1000 --shell /bin/bash heroku \
+    && mkdir -p /data/sessions /data/loaded_modules \
+    && chown -R heroku:heroku /data
 
-WORKDIR /data
-RUN mkdir /data/private
+WORKDIR /opt/heroku
 
-RUN git clone https://github.com/Heroku-userbot/Heroku /data/Heroku
+COPY --chown=heroku:heroku . /opt/heroku
 
-WORKDIR /data/Heroku
+RUN pip install --no-cache-dir --upgrade -r /opt/heroku/requirements.txt \
+    && python -c "import hashlib; from pathlib import Path; p=Path('/opt/heroku/requirements.txt'); Path('/opt/heroku/.requirements_hash').write_text(hashlib.sha256(p.read_bytes()).hexdigest())" \
+    && if [ -d /opt/heroku/.git ]; then chown -R heroku:heroku /opt/heroku/.git; fi \
+    && chown heroku:heroku /opt/heroku/.requirements_hash \
+    && rm -rf /root/.cache/pip
 
-ARG HEROKU_REF=master
-RUN git fetch origin "${HEROKU_REF}" && git checkout "${HEROKU_REF}" && git pull origin "${HEROKU_REF}"
+USER heroku
+# Drop the builder's hooks path. Git refuses that config when it is not the
+# repo owner, so this runs as the runtime user.
+RUN if [ -d /opt/heroku/.git ]; then git -C /opt/heroku config --unset-all core.hooksPath || true; fi
+# Runtime pip (startup hash check and `.update`) cannot write the system
+# site-packages. User-site installs stay on this account's sys.path.
+ENV PIP_USER=1 \
+    PATH="/home/heroku/.local/bin:${PATH}"
+VOLUME /data
 
-RUN pip install --no-cache-dir --no-warn-script-location --disable-pip-version-check --upgrade -r requirements.txt
-
-CMD ["python", "-m", "heroku", "--root"]
+CMD ["python", "-m", "heroku"]
