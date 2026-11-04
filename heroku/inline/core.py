@@ -13,6 +13,7 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import asyncio
+import contextlib
 import logging
 import os
 import sqlite3
@@ -73,6 +74,27 @@ from .token_obtainment import TokenObtainment
 from .utils import Utils
 
 logger = logging.getLogger(__name__)
+
+# RPC failures and revoked tokens must not be retried forever. A dropped
+# socket (proxy idle close, reset, WebSocket close) should.
+_RECOVERABLE_DISCONNECT_NAMES = frozenset(
+    {
+        "ConnectionClosed",
+        "ConnectionClosedError",
+        "ConnectionClosedOK",
+        "IncompleteReadError",
+        "TimeoutError",
+    }
+)
+
+
+def inline_disconnect_is_recoverable(exc: BaseException | None) -> bool:
+    """True when the inline bot should open the socket again."""
+    if exc is None:
+        return True
+    if isinstance(exc, (OSError, asyncio.IncompleteReadError, TimeoutError)):
+        return True
+    return type(exc).__name__ in _RECOVERABLE_DISCONNECT_NAMES
 
 if typing.TYPE_CHECKING:
     from ..loader import Modules
@@ -182,6 +204,8 @@ class InlineManager(
 
         self._bot_update_handlers: dict[str, tuple[str, typing.Callable]] = {}
         self._bot_handler_refs: dict[str, tuple[typing.Callable, object]] = {}
+        self._bot_guard_task: asyncio.Task | None = None
+        self._bot_stop = asyncio.Event()
 
     async def _cleaner(self):
         """Cleans outdated inline units"""
@@ -266,6 +290,7 @@ class InlineManager(
         :return: None
         :rtype: None
         """
+        await self._stop_inline_bot_guard()
         self._me = self._client.tg_id
         self._name = get_display_name(self._client.heroku_me)
 
@@ -293,6 +318,8 @@ class InlineManager(
             "Inline bot transport: %s",
             getattr(connection, "__name__", connection),
         )
+        # The user client retries forever. The library default (5) gives up
+        # during a proxy blip and leaves inline forms dead until restart.
         self._bot_client = TelegramClient(
             SQLiteSession(
                 os.path.join(main.SESSIONS_DIR, f"heroku-{self._me}-bot-{bot_uid}")
@@ -302,6 +329,9 @@ class InlineManager(
             connection=connection,
             proxy=proxy,
             receive_updates=True,
+            connection_retries=None,
+            auto_reconnect=True,
+            retry_delay=1,
         )
 
         try:
@@ -352,6 +382,7 @@ class InlineManager(
             return result
 
         self.init_complete = True
+        self._start_inline_bot_guard()
 
         try:
             _folders = await self._client(GetDialogFiltersRequest())
@@ -439,8 +470,102 @@ class InlineManager(
         await self._client.delete_messages(self.bot_username, m)
         return True
 
+    async def _stop_inline_bot_guard(self) -> None:
+        stop = getattr(self, "_bot_stop", None)
+        if isinstance(stop, asyncio.Event) and not stop.is_set():
+            stop.set()
+        task = getattr(self, "_bot_guard_task", None)
+        self._bot_guard_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    def _start_inline_bot_guard(self) -> None:
+        stop = getattr(self, "_bot_stop", None)
+        if not isinstance(stop, asyncio.Event) or stop.is_set():
+            self._bot_stop = asyncio.Event()
+        task = getattr(self, "_bot_guard_task", None)
+        if task is not None and not task.done():
+            return
+        self._bot_guard_task = asyncio.create_task(self._watch_inline_bot())
+
+    async def _revive_inline_bot(self, client) -> bool:
+        delay = 1.0
+        while (
+            not self._bot_stop.is_set()
+            and client is self._bot_client
+            and self.init_complete
+        ):
+            try:
+                logger.info("Reconnecting inline bot after a dropped MTProto session")
+                await client.connect()
+                if client.is_connected():
+                    logger.info("Inline bot connection restored")
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if not inline_disconnect_is_recoverable(exc):
+                    logger.error(
+                        "Inline bot reconnect stopped (%s)",
+                        type(exc).__name__,
+                    )
+                    return False
+                logger.warning(
+                    "Inline bot reconnect failed (%s); retrying in %.0fs",
+                    type(exc).__name__,
+                    delay,
+                )
+            try:
+                await asyncio.wait_for(self._bot_stop.wait(), timeout=delay)
+                return False
+            except asyncio.TimeoutError:
+                delay = min(delay * 2, 30.0)
+        return False
+
+    async def _watch_inline_bot(self) -> None:
+        """Bring the inline bot back if Telethon stops reconnecting.
+
+        Auto-reconnect covers ordinary drops. This runs only after that sender
+        has given up, so a proxy blip cannot leave ``bot_username`` set on a
+        client that will never receive updates again.
+        """
+        while not self._bot_stop.is_set():
+            client = self._bot_client
+            if client is None or not self.init_complete:
+                try:
+                    await asyncio.wait_for(self._bot_stop.wait(), timeout=1)
+                except asyncio.TimeoutError:
+                    continue
+                return
+
+            try:
+                await client.disconnected
+                exc = None
+            except asyncio.CancelledError:
+                raise
+            except Exception as caught:
+                exc = caught
+
+            if (
+                self._bot_stop.is_set()
+                or client is not self._bot_client
+                or not self.init_complete
+            ):
+                return
+            if not inline_disconnect_is_recoverable(exc):
+                logger.error(
+                    "Inline bot disconnected (%s); not reconnecting",
+                    type(exc).__name__ if exc is not None else "clean",
+                )
+                return
+            if not await self._revive_inline_bot(client):
+                return
+
     async def _stop(self):
         """Stop the bot"""
+        await self._stop_inline_bot_guard()
         if self._task:
             self._task.cancel()
         if self._bot_client:

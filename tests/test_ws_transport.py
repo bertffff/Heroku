@@ -16,6 +16,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -42,7 +43,12 @@ from heroku.network.transport import (
     local_tunnel_available,
     normalize_proxy_addr,
 )
-from heroku.network.ws_obfuscated import _WsByteReader, _WsByteWriter
+from heroku.network.ws_obfuscated import (
+    WS_STABLE_UPTIME,
+    _WsByteReader,
+    _WsByteWriter,
+    benign_socket_close,
+)
 
 _DATA_ROOT = tempfile.mkdtemp(prefix="heroku-ws-test-")
 _MAIN = None
@@ -189,6 +195,26 @@ class TransportPolicyTest(unittest.TestCase):
             )
 
 
+class ApiCredentialTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.credentials = staticmethod(_main().api_credentials_from_environ)
+
+    def test_blank_env_is_ignored(self):
+        credentials = self.credentials
+        self.assertIsNone(credentials({}))
+        self.assertIsNone(credentials({"api_id": "", "api_hash": ""}))
+        self.assertIsNone(credentials({"api_id": "  ", "api_hash": "abc"}))
+        self.assertEqual(
+            credentials({"API_ID": "9", "API_HASH": "hash"}),
+            ("9", "hash"),
+        )
+        self.assertEqual(
+            credentials({"api_id": "1", "api_hash": "a", "API_ID": "2", "API_HASH": "b"}),
+            ("1", "a"),
+        )
+
+
 class CliWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -328,6 +354,37 @@ class ByteStreamTest(unittest.IsolatedAsyncioTestCase):
         writer.write(b"nope")
         await writer.drain()
         self.assertEqual(sent, [b"abcd"])
+
+    async def test_writer_maps_websocket_close_to_connection_error(self):
+        from websockets.exceptions import ConnectionClosed as RealClosed
+
+        class ClosingWS:
+            async def send(self, data):
+                raise RealClosed(None, None)
+
+        writer = _WsByteWriter(ClosingWS(), [])
+        writer.write(b"ping")
+        with self.assertRaises(ConnectionError) as caught:
+            await writer.drain()
+        self.assertIsInstance(caught.exception.__cause__, RealClosed)
+
+        class ResetWS:
+            async def send(self, data):
+                raise ConnectionResetError("reset")
+
+        writer = _WsByteWriter(ResetWS(), [])
+        writer.write(b"ping")
+        with self.assertRaises(ConnectionResetError):
+            await writer.drain()
+
+        class BugWS:
+            async def send(self, data):
+                raise RuntimeError("bug")
+
+        writer = _WsByteWriter(BugWS(), [])
+        writer.write(b"ping")
+        with self.assertRaises(RuntimeError):
+            await writer.drain()
 
 
 class _LocalConnection(ConnectionWsObfuscated):
@@ -487,7 +544,9 @@ class LiveWebSocketTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["origin"], "https://web.telegram.org")
         self.assertEqual(kwargs["subprotocols"], ["binary"])
         self.assertIsNone(kwargs["proxy"])
-        self.assertIsNone(kwargs.get("ping_interval"))
+        self.assertEqual(kwargs["ping_interval"], 20.0)
+        self.assertIsNone(kwargs["ping_timeout"])
+        self.assertIsNone(kwargs["compression"])
         inspect.signature(websockets.connect).bind(prod_uri, **kwargs)
 
     async def test_failed_handshake_closes_proxy_socket(self):
@@ -521,6 +580,165 @@ class LiveWebSocketTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OSError):
                 await conn._connect(timeout=5)
         self.assertEqual(sock_box["sock"].fileno(), -1)
+
+    async def test_peer_close_is_an_empty_read(self):
+        state = {"got": asyncio.Event(), "release": asyncio.Event()}
+
+        async def handler(websocket):
+            await websocket.recv()
+            state["got"].set()
+            await state["release"].wait()
+            await websocket.close()
+
+        server = await websockets.serve(
+            handler,
+            "127.0.0.1",
+            0,
+            subprotocols=["binary"],
+        )
+        port = server.sockets[0].getsockname()[1]
+        uri = f"ws://127.0.0.1:{port}/apiws"
+        conn = _LocalConnection(uri, "149.154.167.51", 443, 2, loggers=_loggers())
+        try:
+            with patch(
+                "heroku.network.ws_obfuscated.egress_proxy_url",
+                return_value=None,
+            ):
+                await conn._connect(timeout=5)
+            await asyncio.wait_for(state["got"].wait(), 2)
+            state["release"].set()
+            with self.assertRaises(asyncio.IncompleteReadError) as caught:
+                await asyncio.wait_for(conn._reader.readexactly(1), 2)
+            self.assertEqual(len(caught.exception.partial), 0)
+            self.assertTrue(benign_socket_close(caught.exception))
+            await conn.disconnect()
+        finally:
+            state["release"].set()
+            server.close()
+            await server.wait_closed()
+
+
+class ClosePolicyTest(unittest.TestCase):
+    def test_empty_read_is_benign_and_a_partial_packet_is_not(self):
+        self.assertTrue(benign_socket_close(asyncio.IncompleteReadError(b"", 0)))
+        self.assertTrue(benign_socket_close(asyncio.IncompleteReadError(b"", 1)))
+        self.assertFalse(benign_socket_close(asyncio.IncompleteReadError(b"\x01", 8)))
+        self.assertTrue(benign_socket_close(ConnectionResetError("reset")))
+        self.assertFalse(benign_socket_close(RuntimeError("bug")))
+
+    def test_short_lived_close_backs_off_and_a_stable_one_does_not(self):
+        conn = _connection()
+        conn._opened_at = time.monotonic()
+        conn._account_close()
+        self.assertEqual(conn._backoff_step, 1)
+        self.assertEqual(conn._reconnect_delay(), 1.0)
+
+        conn._opened_at = time.monotonic()
+        conn._account_close()
+        self.assertEqual(conn._reconnect_delay(), 2.0)
+
+        conn._backoff_step = 5
+        self.assertEqual(conn._reconnect_delay(), 16.0)
+
+        conn._opened_at = time.monotonic() - (WS_STABLE_UPTIME + 1)
+        conn._account_close()
+        self.assertEqual(conn._backoff_step, 0)
+        self.assertEqual(conn._reconnect_delay(), 0.0)
+
+    def test_failed_open_uses_the_same_backoff(self):
+        conn = _connection()
+        conn._note_failed_open()
+        conn._note_failed_open()
+        self.assertEqual(conn._reconnect_delay(), 2.0)
+
+
+class QuietReconnectTest(unittest.IsolatedAsyncioTestCase):
+    async def _run_recv(self, error):
+        conn = _connection()
+        conn._connected = True
+
+        async def fail():
+            raise error
+
+        conn._recv = fail
+        with self.assertNoLogs("test.ws", level="WARNING"):
+            with self.assertLogs("test.ws", level="DEBUG") as captured:
+                await conn._recv_loop()
+        queued, err = conn._recv_queue.get_nowait()
+        return conn, captured.output, queued, err
+
+    async def test_idle_close_is_debug_and_still_queued(self):
+        conn, output, queued, err = await self._run_recv(
+            asyncio.IncompleteReadError(b"", 0)
+        )
+        self.assertFalse(conn._connected)
+        self.assertIsNone(queued)
+        self.assertIsInstance(err, asyncio.IncompleteReadError)
+        joined = "\n".join(output)
+        self.assertIn("reconnecting", joined)
+        self.assertNotIn("Server closed the connection", joined)
+
+    async def test_truncated_packet_stays_a_warning(self):
+        conn = _connection()
+        conn._connected = True
+
+        async def fail():
+            raise asyncio.IncompleteReadError(b"\xab", 8)
+
+        conn._recv = fail
+        with self.assertLogs("test.ws", level="WARNING") as captured:
+            await conn._recv_loop()
+        self.assertIn("Server closed the connection", "\n".join(captured.output))
+        _, err = conn._recv_queue.get_nowait()
+        self.assertIsInstance(err, asyncio.IncompleteReadError)
+
+    async def test_backoff_sleeps_only_after_a_short_life(self):
+        from unittest.mock import AsyncMock
+
+        conn = _connection()
+        with patch(
+            "heroku.network.ws_obfuscated.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep:
+            await conn._await_reconnect_backoff()
+        sleep.assert_not_awaited()
+
+        conn._backoff_step = 3
+        with patch(
+            "heroku.network.ws_obfuscated.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep:
+            await conn._await_reconnect_backoff()
+        sleep.assert_awaited_once_with(4.0)
+
+    async def test_recv_loop_task_closes_without_cancelling_itself(self):
+        conn = _connection()
+        conn._connected = True
+
+        async def fail():
+            raise asyncio.IncompleteReadError(b"", 1)
+
+        conn._recv = fail
+        task = asyncio.create_task(conn._recv_loop())
+        conn._recv_task = task
+        await asyncio.wait_for(task, 2)
+        self.assertTrue(task.done())
+        self.assertFalse(task.cancelled())
+        self.assertIsNone(task.exception())
+        self.assertFalse(conn._connected)
+        queued, err = conn._recv_queue.get_nowait()
+        self.assertIsNone(queued)
+        self.assertIsInstance(err, asyncio.IncompleteReadError)
+
+
+class PrivateFileTest(unittest.TestCase):
+    def test_private_write_mode(self):
+        from heroku._internal import private_write
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config.json")
+            private_write(path, '{"api_hash": "secret"}')
+            self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
 
 
 def socketpair():

@@ -14,6 +14,7 @@ works the bot never started and invites crashed on a missing username.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import os
 import shutil
@@ -41,7 +42,10 @@ sys.argv = [
 ]
 
 import heroku.main as main  # noqa: E402
-from heroku.inline.core import InlineManager  # noqa: E402
+from heroku.inline.core import (  # noqa: E402
+    InlineManager,
+    inline_disconnect_is_recoverable,
+)
 from heroku.network import (  # noqa: E402
     ConnectionWsObfuscated,
     client_transport,
@@ -298,6 +302,9 @@ class BotClientWiringTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("heroku-100-bot-42", seen["session"].filename)
         self.assertEqual(seen["start"], {"bot_token": "42:unit-test"})
         self.assertTrue(seen["kwargs"]["receive_updates"])
+        self.assertIsNone(seen["kwargs"]["connection_retries"])
+        self.assertTrue(seen["kwargs"]["auto_reconnect"])
+        self.assertEqual(seen["kwargs"]["retry_delay"], 1)
         return seen["kwargs"]
 
     async def test_bot_client_copies_user_transport(self):
@@ -322,6 +329,78 @@ class BotClientWiringTest(unittest.IsolatedAsyncioTestCase):
             ))
         self.assertIs(kwargs["connection"], ConnectionWsObfuscated)
         self.assertIsNone(kwargs["proxy"])
+
+
+class InlineReconnectTest(unittest.IsolatedAsyncioTestCase):
+    def test_recoverable_classification(self):
+        self.assertTrue(inline_disconnect_is_recoverable(None))
+        self.assertTrue(inline_disconnect_is_recoverable(ConnectionError("closed")))
+        self.assertTrue(
+            inline_disconnect_is_recoverable(asyncio.IncompleteReadError(b"", 0))
+        )
+        self.assertFalse(inline_disconnect_is_recoverable(RuntimeError("token revoked")))
+
+    async def test_guard_reconnects_after_network_drop(self):
+        loop = asyncio.get_running_loop()
+        dropped = loop.create_future()
+        dropped.set_exception(ConnectionError("0 bytes read on a total of 0 expected bytes"))
+
+        class Client:
+            def __init__(self):
+                self.disconnected = dropped
+                self.connects = 0
+                self._up = False
+
+            def is_connected(self):
+                return self._up
+
+            async def connect(self):
+                self.connects += 1
+                self._up = True
+                self.disconnected = loop.create_future()
+
+        manager = InlineManager.__new__(InlineManager)
+        manager.init_complete = True
+        manager._bot_stop = asyncio.Event()
+        manager._bot_client = Client()
+        manager._bot_guard_task = asyncio.create_task(manager._watch_inline_bot())
+        try:
+            for _ in range(50):
+                if manager._bot_client.connects:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(manager._bot_client.connects, 1)
+            self.assertTrue(manager._bot_client.is_connected())
+        finally:
+            await manager._stop_inline_bot_guard()
+
+    async def test_guard_leaves_auth_failures_down(self):
+        loop = asyncio.get_running_loop()
+        dropped = loop.create_future()
+
+        class TokenRevoked(Exception):
+            pass
+
+        dropped.set_exception(TokenRevoked("auth key unregistered"))
+
+        class Client:
+            def __init__(self):
+                self.disconnected = dropped
+                self.connects = 0
+
+            def is_connected(self):
+                return False
+
+            async def connect(self):
+                self.connects += 1
+
+        manager = InlineManager.__new__(InlineManager)
+        manager.init_complete = True
+        manager._bot_stop = asyncio.Event()
+        manager._bot_client = Client()
+        with self.assertLogs("heroku.inline.core", level="ERROR"):
+            await asyncio.wait_for(manager._watch_inline_bot(), 1)
+        self.assertEqual(manager._bot_client.connects, 0)
 
 
 if __name__ == "__main__":
