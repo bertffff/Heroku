@@ -103,6 +103,8 @@ _TG_EMOJI = re.compile(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", re.IGNORECASE | re.
 
 MIGRATION_DB_NS = "heroku.main"
 MIGRATION_DB_KEY = "legacy_branding_migrated"
+# Integer watermark. Installs that only have the boolean flag are version 1.
+MIGRATION_VERSION_KEY = "legacy_branding_version"
 
 
 def local_asset(name: str) -> Path:

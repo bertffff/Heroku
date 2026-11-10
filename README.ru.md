@@ -97,7 +97,7 @@ Kanjo может выполнять код и команды оболочки о
 
 ## Модули
 
-Имена встроенных модулей (`HerokuInfo`, `Settings`, `Loader` и остальные) те же, поэтому `.help HerokuInfo` их по-прежнему находит. Как писать свой модуль: [docs/MODULES.ru.md](docs/MODULES.ru.md). Каталог модулей по умолчанию — совместимый с Heroku индекс. Это источник модулей, а не чат поддержки.
+Имена встроенных модулей (`HerokuInfo`, `Settings`, `Loader` и остальные) те же, поэтому `.help HerokuInfo` их по-прежнему находит. Как писать свой модуль: [docs/MODULES.ru.md](docs/MODULES.ru.md). Сторонний каталог модулей по умолчанию — upstream (`https://raw.githubusercontent.com/coddrago/modules/main`). Это источник модулей, а не чат поддержки Kanjo. Его можно сменить в `.config` у модуля Loader (`MODULES_REPO`). Дополнительные каталоги задаются в `ADDITIONAL_REPOS`.
 
 ## Авторы и лицензия
 

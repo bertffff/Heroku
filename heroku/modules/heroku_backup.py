@@ -55,6 +55,12 @@ class HerokuBackupMod(loader.Module):
 
     async def inline_ready(self):
         if not self.get("period"):
+            # The prompt uploads a photo. Keep it off the startup await so a
+            # slow send does not hold every other inline_ready handler.
+            self._backup_prompt_task = asyncio.create_task(self._offer_backup_period())
+
+    async def _offer_backup_period(self):
+        try:
             caption = self.strings["period"]
             markup = self.inline.generate_markup(
                 utils.chunks(
@@ -91,7 +97,11 @@ class HerokuBackupMod(loader.Module):
                     caption,
                     reply_markup=markup,
                 ),
+                db=getattr(self, "_db", None),
+                scope="bot",
             )
+        except Exception:
+            logger.exception("Could not offer a backup schedule")
 
     async def _set_backup_period(self, call: BotInlineCall, value: int):
         if not value:

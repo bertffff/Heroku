@@ -97,7 +97,7 @@ Kanjo can run code and shell commands as the user that started it. Read [docs/SE
 
 ## Modules
 
-Core module ids (`HerokuInfo`, `Settings`, `Loader`, …) are unchanged, so `.help HerokuInfo` still finds them. A short writing guide is [docs/MODULES.md](docs/MODULES.md). The default module index remains the Heroku-compatible catalog; that is a module source, not a support channel.
+Core module ids (`HerokuInfo`, `Settings`, `Loader`, …) are unchanged, so `.help HerokuInfo` still finds them. A short writing guide is [docs/MODULES.md](docs/MODULES.md). The default third-party module catalog is upstream's (`https://raw.githubusercontent.com/coddrago/modules/main`). It is a module source, not a Kanjo support channel, and it can be changed in `.config` for Loader (`MODULES_REPO`). Extra catalogs go in `ADDITIONAL_REPOS`.
 
 ## Credits and license
 
