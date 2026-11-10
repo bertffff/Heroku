@@ -446,6 +446,7 @@ inline_stuff:
   prefix_reset: "🔀 Prefix reset!"
   _cmd_doc_ch_heroku_bot: "<username> - Change your Heroku inline bot username"
   _cls_doc: "Provides support for inline stuff"
+  _cfg_disabled_current_page: "Show the current page of inline lists and galleries as a disabled button. Off keeps the page clickable."
 
   _cmd_doc_ch_bot_token: <token> - Change inline bot token
 test:

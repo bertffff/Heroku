@@ -6,6 +6,7 @@ import typing
 
 from herokutl import Button
 from herokutl.errors.rpcbaseerrors import RPCError
+from herokutl.errors.rpcerrorlist import FloodWaitError
 from herokutl.extensions import html as html_parser
 from herokutl import utils as tl_utils
 from herokutl.tl import types
@@ -28,6 +29,53 @@ from herokutl.tl import TLObject
 from .._internal import normalize_rich_html
 
 logger = logging.getLogger(__name__)
+
+
+def _rejected_delivery_flags(exc: BaseException, *, protected: bool, effect) -> tuple[bool, object] | None:
+    """Flags to keep after ``exc``, or ``None`` when the error must propagate.
+
+    Flood waits are never retried. Only errors that name an effect or a
+    no-forwards restriction drop the matching flag.
+    """
+    if isinstance(exc, FloodWaitError):
+        return None
+    if not isinstance(exc, RPCError):
+        return None
+
+    blob = f"{type(exc).__name__} {getattr(exc, 'message', '')} {exc}".lower()
+    drop_effect = "effect" in blob and effect is not None
+    drop_protect = protected and any(
+        token in blob
+        for token in (
+            "noforward",
+            "no_forward",
+            "forwards_restricted",
+            "chat_forwards",
+        )
+    )
+    if not drop_effect and not drop_protect:
+        return None
+    return (not drop_protect and protected, None if drop_effect else effect)
+
+
+async def _resend_without_rejected_flags(send, exc, *, protected: bool, effect, where: str):
+    adjusted = _rejected_delivery_flags(exc, protected=protected, effect=effect)
+    if adjusted is None:
+        raise exc
+    new_protected, new_effect = adjusted
+    if protected and not new_protected:
+        logger.warning(
+            "protect_content was rejected on %s (%s); resending without it",
+            where,
+            getattr(exc, "message", None) or type(exc).__name__,
+        )
+    if effect is not None and new_effect is None:
+        logger.debug(
+            "message_effect_id was rejected on %s (%s); resending without it",
+            where,
+            getattr(exc, "message", None) or type(exc).__name__,
+        )
+    return await send(new_protected, new_effect)
 
 
 def _button_style(style: str | None = None, icon: int | None = None):
@@ -200,15 +248,6 @@ class TelethonBot:
         message_effect_id: int | None = None,
         **kwargs,
     ):
-        if protect_content is None:
-            protect_content = kwargs.pop("protect_content", None)
-        else:
-            kwargs.pop("protect_content", None)
-        if message_effect_id is None:
-            message_effect_id = kwargs.pop("message_effect_id", None)
-        else:
-            kwargs.pop("message_effect_id", None)
-
         if rich_message is not None:
             return await self.send_rich_message(
                 chat_id,
@@ -242,17 +281,19 @@ class TelethonBot:
                 )
             )
 
+        protected = bool(protect_content)
         try:
-            return await _send(bool(protect_content), message_effect_id)
-        except RPCError:
-            if not protect_content and message_effect_id is None:
-                raise
-            logger.debug(
-                "protect_content/message_effect_id rejected on send_message; "
-                "resending without them",
-                exc_info=True,
+            return await _send(protected, message_effect_id)
+        except FloodWaitError:
+            raise
+        except RPCError as exc:
+            return await _resend_without_rejected_flags(
+                _send,
+                exc,
+                protected=protected,
+                effect=message_effect_id,
+                where="send_message",
             )
-            return await _send(False, None)
 
     @staticmethod
     def _rich_input(html=None, markdown=None, rich_message=None):
@@ -329,17 +370,19 @@ class TelethonBot:
             result = await self.client(request)
             return self.client._get_response_message(request, result, entity)
 
+        protected = bool(protect_content)
         try:
-            return await _send(bool(protect_content), message_effect_id)
-        except RPCError:
-            if not protect_content and message_effect_id is None:
-                raise
-            logger.debug(
-                "protect_content/message_effect_id rejected on send_rich_message; "
-                "resending without them",
-                exc_info=True,
+            return await _send(protected, message_effect_id)
+        except FloodWaitError:
+            raise
+        except RPCError as exc:
+            return await _resend_without_rejected_flags(
+                _send,
+                exc,
+                protected=protected,
+                effect=message_effect_id,
+                where="send_rich_message",
             )
-            return await _send(False, None)
 
     async def edit_rich_message(
         self,
@@ -479,8 +522,8 @@ class TelethonBot:
                 await self.client.send_file(chat_id, file, **send_kwargs)
             )
 
-        if protect_content:
-            try:
+        async def send(protected: bool, effect):
+            if protected:
                 return await self._send_protected_media(
                     chat_id,
                     file,
@@ -491,25 +534,26 @@ class TelethonBot:
                     attributes=attributes,
                     thumb=thumb,
                     silent=silent,
-                    message_effect_id=message_effect_id,
+                    message_effect_id=effect,
                 )
-            except RPCError:
-                logger.debug(
-                    "protect_content is not available for this media send; "
-                    "falling back to send_file",
-                    exc_info=True,
-                )
+            return await via_send_file(effect)
+
+        protected = bool(protect_content)
+        if not protected and message_effect_id is None:
+            return await via_send_file(None)
 
         try:
-            return await via_send_file(message_effect_id)
-        except RPCError:
-            if message_effect_id is None:
-                raise
-            logger.debug(
-                "message_effect_id was rejected; resending media without it",
-                exc_info=True,
+            return await send(protected, message_effect_id)
+        except FloodWaitError:
+            raise
+        except RPCError as exc:
+            return await _resend_without_rejected_flags(
+                send,
+                exc,
+                protected=protected,
+                effect=message_effect_id,
+                where="send_file",
             )
-            return await via_send_file(None)
 
     async def send_document(
         self,

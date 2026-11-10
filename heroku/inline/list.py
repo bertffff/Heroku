@@ -333,6 +333,8 @@ class List(InlineUnit):
                     reply_markup=markup,
                 )
                 return
+            except FloodWaitError:
+                raise
             except (RPCError, TypeError):
                 logger.debug(
                     "Rich list edit failed; falling back to HTML", exc_info=True

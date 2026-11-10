@@ -845,12 +845,13 @@ class Utils(InlineUnit):
             getter = getattr(getattr(self, "_db", None), "get", None)
             if callable(getter):
                 try:
+                    config = getter("InlineStuff", "__config__", {}) or {}
                     disabled_current = bool(
-                        getter("heroku.inline", "disabled_current_page", False)
+                        config.get("disabled_current_page", False)
                     )
                 except Exception:
                     logger.debug(
-                        "Can't read heroku.inline disabled_current_page",
+                        "Can't read InlineStuff disabled_current_page",
                         exc_info=True,
                     )
                     disabled_current = False
@@ -950,7 +951,7 @@ class Utils(InlineUnit):
                 or "web_app" in button
                 or "switch_inline_query_current_chat" in button
                 or "switch_inline_query" in button
-                or "disabled" in button
+                or button.get("disabled")
                 for button in row
             )
             for row in buttons

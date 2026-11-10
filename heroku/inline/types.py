@@ -386,6 +386,17 @@ class _CallbackMixin:
                 )
             )
 
+        def alert_text() -> str:
+            source = text or ""
+            if not source and rich_message is not None:
+                if isinstance(rich_message, str):
+                    source = TelethonBot._rich_fallback_text(html=rich_message)
+                else:
+                    source = TelethonBot._rich_fallback_text(
+                        rich_message=rich_message
+                    )
+            return (source or "")[:200]
+
         try:
             await _send(replace)
         except RPCError:
@@ -401,18 +412,18 @@ class _CallbackMixin:
                         "Ephemeral answer is unsupported; falling back to an alert",
                         exc_info=True,
                     )
-                    return await self.answer((text or "")[:200], show_alert=True)
+                    return await self.answer(alert_text(), show_alert=True)
             else:
                 logger.debug(
                     "Ephemeral answer is unsupported; falling back to an alert",
                     exc_info=True,
                 )
-                return await self.answer((text or "")[:200], show_alert=True)
+                return await self.answer(alert_text(), show_alert=True)
         except Exception:
             logger.debug(
                 "Ephemeral answer failed; falling back to an alert", exc_info=True
             )
-            return await self.answer((text or "")[:200], show_alert=True)
+            return await self.answer(alert_text(), show_alert=True)
 
         try:
             await self.original_call.answer()

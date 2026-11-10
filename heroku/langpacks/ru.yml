@@ -412,6 +412,7 @@ inline_stuff:
 
   name: InlineStuff
   _cls_doc: Настройка inline-бота
+  _cfg_disabled_current_page: "Показывать текущую страницу списков и галерей неактивной кнопкой. Выключено — страница остаётся нажимаемой."
   _cmd_doc_ch_bot_token: <token> - Изменить токен inline-бота
 test:
   set_loglevel: "<tg-emoji emoji-id=5355133243773435190>🚫</tg-emoji> <b>Укажи уровень логов числом или строкой</b>"

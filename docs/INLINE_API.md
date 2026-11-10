@@ -2,8 +2,9 @@
 
 These kwargs and button keys are opt-in. Omitting them keeps the previous
 Hikka/FTG behaviour. The inline bot speaks MTProto through herokutl 2.2.1
-(layer 230), not the HTTP Bot API. If a server or client rejects a new flag,
-the call logs at debug and falls back to the old request.
+(layer 230), not the HTTP Bot API. A rejection that names the new flag is
+retried without it. `FloodWait` is never retried. Dropping `protect_content`
+is logged as a warning; other flag fallbacks are debug.
 
 Widgets from Bot API 10.4 are not in this layer, so they are not exposed.
 
@@ -35,8 +36,8 @@ client.
 
 `build_pagination(..., disabled_current=False)` still gives the current page a
 callback, so modules that read the page argument keep working. Pass
-`disabled_current=True`, or set the database key `heroku.inline` /
-`disabled_current_page` to true, to render `· N ·` as a disabled button.
+`disabled_current=True`, or turn on **disabled_current_page** in
+`.config InlineStuff` (default off), to render `· N ·` as a disabled button.
 
 ## Ephemeral replies
 
@@ -145,7 +146,7 @@ raw MTProto update. Nothing about existing types changes.
 - `edited_business_message`
 - `deleted_business_messages`
 - `purchased_paid_media`
-- `bot_stopped` and `my_chat_member_private` (both are `UpdateBotStopped`)
+- `bot_stopped` (`UpdateBotStopped`)
 - `subscription`
 - `ephemeral_callback_query`
 
@@ -163,6 +164,20 @@ utils.expandable("long log")  # <blockquote expandable>long log</blockquote>
 ```
 
 The HTML parser already maps that tag to a collapsed blockquote.
+
+## Try it
+
+`examples/inline_qol_demo.py` is not loaded with the core modules. Reply to
+that file with `.loadmod`. It adds:
+
+| command | what it sends |
+|---|---|
+| `.qoldisabled` | form with a disabled button plus styled copy and web app buttons |
+| `.qolephem` | ephemeral answer button, and a callback that calls `answer_ephemeral` |
+| `.qolpreview` | form whose link preview is large and above the text |
+| `.qolrich` | rich list using `utils.expandable` |
+| `.qolstream` | draft stream into your bot PM, then a real message |
+| `.qolprotect` | protected bot-PM message with a message effect |
 
 ## What still needs a real account
 

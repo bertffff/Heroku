@@ -13,6 +13,10 @@
  - register business, paid media, stars subscription, bot stopped and ephemeral button-press updates on `register_bot_update_handler`
  - add `rich=True` for `list()` and `utils.expandable()`
  - see `docs/INLINE_API.md`
+ - keep FloodWait on inline sends and rich list edits (do not resend without the new flags)
+ - log a warning when `protect_content` is dropped after the server rejects it
+ - add InlineStuff config `disabled_current_page` (`.config InlineStuff`, default off)
+ - add `examples/inline_qol_demo.py` (not loaded automatically)
 
 ## 🪐 Heroku 2.2.0
 

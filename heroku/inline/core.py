@@ -133,7 +133,6 @@ BotUpdateType = typing.Literal[
     "deleted_business_messages",
     "purchased_paid_media",
     "bot_stopped",
-    "my_chat_member_private",
     "subscription",
     "ephemeral_callback_query",
 ]
@@ -174,7 +173,6 @@ _BOT_UPDATE_EVENTS: dict[BotUpdateType, typing.Callable[[], object]] = {
     ),
     "purchased_paid_media": lambda: events.Raw(types=UpdateBotPurchasedPaidMedia),
     "bot_stopped": lambda: events.Raw(types=UpdateBotStopped),
-    "my_chat_member_private": lambda: events.Raw(types=UpdateBotStopped),
     "subscription": lambda: events.Raw(types=UpdateBotStarsSubscription),
     "ephemeral_callback_query": lambda: events.Raw(
         types=UpdateEphemeralBotCallbackQuery

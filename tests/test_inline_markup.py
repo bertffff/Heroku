@@ -21,6 +21,7 @@ from types import SimpleNamespace
 os.environ.setdefault("HEROKU_NO_GIT", "1")
 
 from herokutl.errors.rpcbaseerrors import RPCError
+from herokutl.errors.rpcerrorlist import FloodWaitError, MessageNotModifiedError
 from herokutl.tl import types
 from herokutl.tl.functions.messages import SendMediaRequest, SetTypingRequest
 
@@ -178,6 +179,9 @@ class MarkupTests(unittest.TestCase):
         buttons = [[{"text": "X", "disabled": True}]]
         self.assertEqual(host._validate_markup(buttons), buttons)
         self.assertIsNone(host._validate_markup([[{"text": "bare"}]]))
+        self.assertIsNone(
+            host._validate_markup([[{"text": "X", "disabled": False}]])
+        )
 
     def test_ephemeral_answer_action_is_wired(self):
         host = MarkupHost()
@@ -248,8 +252,11 @@ class MarkupTests(unittest.TestCase):
     def test_pagination_reads_db_flag(self):
         host = MarkupHost()
         host._db = SimpleNamespace(
-            get=lambda ns, key, default=False: ns == "heroku.inline"
-            and key == "disabled_current_page"
+            get=lambda ns, key, default=None: (
+                {"disabled_current_page": True}
+                if ns == "InlineStuff" and key == "__config__"
+                else default
+            )
         )
         page = host.build_pagination(lambda n: n, total_pages=1, current_page=1)[0][0]
         self.assertEqual(page, {"text": "· 1 ·", "disabled": True})
@@ -305,7 +312,7 @@ class _Recorder:
     async def __call__(self, request):
         self.calls.append(request)
         if self.fail_protected and isinstance(request, SendMediaRequest):
-            raise _rpc()
+            raise _rpc("CHAT_FORWARDS_RESTRICTED")
         action = getattr(request, "action", None)
         if self.fail_effect and isinstance(action, types.SendMessageTextDraftAction):
             raise _rpc("CHAT_TYPE_INVALID")
@@ -320,7 +327,7 @@ class _Recorder:
     async def send_message(self, *args, **kwargs):
         self.sent.append(kwargs)
         if kwargs.get("noforwards") or kwargs.get("message_effect_id"):
-            raise _rpc()
+            raise _rpc("EFFECT_INVALID CHAT_FORWARDS_RESTRICTED")
         return SimpleNamespace(id=4)
 
     async def send_file(self, *args, **kwargs):
@@ -331,34 +338,101 @@ class _Recorder:
 class SendFallbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_message_strips_rejected_flags(self):
         client = _Recorder()
-        message = await TelethonBot(client).send_message(
-            7,
-            "hi",
-            protect_content=True,
-            message_effect_id=99,
-        )
+        with self.assertLogs("heroku.inline.tl", level="WARNING") as logs:
+            message = await TelethonBot(client).send_message(
+                7,
+                "hi",
+                protect_content=True,
+                message_effect_id=99,
+            )
         self.assertEqual(message.id, 4)
         self.assertEqual(len(client.sent), 2)
         self.assertTrue(client.sent[0]["noforwards"])
         self.assertEqual(client.sent[0]["message_effect_id"], 99)
         self.assertFalse(client.sent[1]["noforwards"])
         self.assertIsNone(client.sent[1]["message_effect_id"])
+        self.assertTrue(any("protect_content" in line for line in logs.output))
+
+    async def test_send_message_does_not_retry_unrelated_or_flood(self):
+        client = _Recorder()
+
+        async def send_message(*args, **kwargs):
+            client.sent.append(kwargs)
+            raise _rpc("CHAT_WRITE_FORBIDDEN")
+
+        client.send_message = send_message
+        with self.assertRaises(RPCError):
+            await TelethonBot(client).send_message(
+                7, "hi", protect_content=True, message_effect_id=1
+            )
+        self.assertEqual(len(client.sent), 1)
+
+        client.sent.clear()
+
+        async def flood(*args, **kwargs):
+            client.sent.append(kwargs)
+            raise FloodWaitError(types.InputPeerEmpty(), 3)
+
+        client.send_message = flood
+        with self.assertRaises(FloodWaitError):
+            await TelethonBot(client).send_message(
+                7, "hi", protect_content=True, message_effect_id=1
+            )
+        self.assertEqual(len(client.sent), 1)
+
+        class RichClient:
+            def __init__(self):
+                self.calls = 0
+
+            async def get_input_entity(self, chat_id):
+                return types.InputPeerUser(1, 2)
+
+            def build_reply_markup(self, markup):
+                return markup
+
+            def _get_response_message(self, request, result, entity):
+                return SimpleNamespace(id=1)
+
+            async def __call__(self, request):
+                self.calls += 1
+                raise FloodWaitError(request, 4)
+
+        rich = RichClient()
+        with self.assertRaises(FloodWaitError):
+            await TelethonBot(rich).send_rich_message(
+                1, html="<b>x</b>", protect_content=True, message_effect_id=9
+            )
+        self.assertEqual(rich.calls, 1)
 
     async def test_protected_media_uses_send_media_then_send_file(self):
         client = _Recorder(fail_protected=True)
-        message = await TelethonBot(client).send_photo(
-            7,
-            b"jpeg",
-            caption="pic",
-            protect_content=True,
-            message_effect_id=5,
-        )
+        with self.assertLogs("heroku.inline.tl", level="WARNING") as logs:
+            message = await TelethonBot(client).send_photo(
+                7,
+                b"jpeg",
+                caption="pic",
+                protect_content=True,
+                message_effect_id=5,
+            )
         self.assertEqual(message.id, 5)
+        self.assertTrue(any("protect_content" in line for line in logs.output))
         self.assertIsInstance(client.calls[0], SendMediaRequest)
         self.assertTrue(client.calls[0].noforwards)
         self.assertEqual(client.calls[0].effect, 5)
         self.assertNotIn("noforwards", client.sent[0])
         self.assertEqual(client.sent[0]["message_effect_id"], 5)
+
+    async def test_protected_media_flood_wait_is_not_resent(self):
+        class FloodClient(_Recorder):
+            async def __call__(self, request):
+                self.calls.append(request)
+                raise FloodWaitError(request, 2)
+
+        client = FloodClient()
+        with self.assertRaises(FloodWaitError):
+            await TelethonBot(client).send_photo(7, b"jpeg", protect_content=True)
+        self.assertEqual(client.sent, [])
+        self.assertEqual(len(client.calls), 1)
 
     async def test_media_effect_fallback(self):
         client = _Recorder()
@@ -366,7 +440,7 @@ class SendFallbackTests(unittest.IsolatedAsyncioTestCase):
         async def send_file(*args, **kwargs):
             client.sent.append(kwargs)
             if kwargs.get("message_effect_id"):
-                raise _rpc()
+                raise _rpc("EFFECT_INVALID")
             return SimpleNamespace(id=8)
 
         client.send_file = send_file
@@ -493,6 +567,18 @@ class EphemeralTests(unittest.IsolatedAsyncioTestCase):
         await mixin.answer_ephemeral("x" * 250)
         text, kwargs = mixin.answered[0]
         self.assertEqual(len(text), 200)
+        self.assertTrue(kwargs["alert"])
+
+    async def test_rich_only_alert_is_plain_text(self):
+        class Client(_Recorder):
+            async def __call__(self, request):
+                raise _rpc("METHOD_INVALID")
+
+        mixin = self._call()
+        mixin.inline_manager = self._manager(Client())
+        await mixin.answer_ephemeral(rich_message="<b>hello</b> secret")
+        text, kwargs = mixin.answered[0]
+        self.assertEqual(text, "hello secret")
         self.assertTrue(kwargs["alert"])
 
     async def test_replace_retries_without_anchor(self):
@@ -671,6 +757,48 @@ class PreviewAndRichTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edits[0][0][1], "<b>page</b>")
         self.assertEqual(edits[0][1]["parse_mode"], "HTML")
 
+    async def test_rich_list_edit_reraises_flood_wait(self):
+        _ensure_main()
+        from heroku.inline.list import List
+
+        class Bot:
+            async def edit_rich_message(self, *args, **kwargs):
+                raise FloodWaitError(types.InputPeerEmpty(), 5)
+
+        class BotClient:
+            async def edit_message(self, *args, **kwargs):
+                raise AssertionError("HTML fallback")
+
+        host = SimpleNamespace(
+            _units={"unit": {"rich": True}},
+            bot=Bot(),
+            _bot_client=BotClient(),
+            _list_markup=lambda unit_id: [],
+        )
+        with self.assertRaises(FloodWaitError):
+            await List._edit_list_text(host, "id", "page", "unit")
+
+    async def test_gallery_invert_does_not_retry_not_modified(self):
+        _ensure_main()
+        from heroku.inline.gallery import Gallery
+
+        calls = []
+
+        class Client:
+            async def edit_message(self, *args, **kwargs):
+                calls.append(kwargs)
+                raise MessageNotModifiedError(types.InputPeerEmpty())
+
+        host = SimpleNamespace(
+            _units={"u": {"invert_media": True}},
+            _bot_client=Client(),
+            _gallery_markup=lambda unit_id: [],
+        )
+        with self.assertRaises(MessageNotModifiedError):
+            await Gallery._edit_gallery_message(host, "mid", "cap", "u")
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0]["invert_media"])
+
 
 class SignatureTests(unittest.TestCase):
     @classmethod
@@ -716,7 +844,6 @@ class SignatureTests(unittest.TestCase):
             "deleted_business_messages",
             "purchased_paid_media",
             "bot_stopped",
-            "my_chat_member_private",
             "subscription",
             "ephemeral_callback_query",
         }

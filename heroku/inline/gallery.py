@@ -27,6 +27,7 @@ from herokutl.errors.rpcerrorlist import (
     FloodWaitError,
     MediaPrevInvalidError,
     MessageIdInvalidError,
+    MessageNotModifiedError,
 )
 from herokutl.tl.types import Message
 
@@ -683,11 +684,15 @@ class Gallery(InlineUnit):
             )
             return await edit(False)
         except RPCError as exc:
-            if not invert or type(exc).__name__ in {
-                "FloodWaitError",
-                "MediaPrevInvalidError",
-                "MessageIdInvalidError",
-            }:
+            if not invert or isinstance(
+                exc,
+                (
+                    FloodWaitError,
+                    MessageNotModifiedError,
+                    MediaPrevInvalidError,
+                    MessageIdInvalidError,
+                ),
+            ):
                 raise
             logger.debug(
                 "Gallery invert_media was rejected (%s); retrying without it",
