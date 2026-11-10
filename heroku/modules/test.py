@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import getpass
 import inspect
 import logging
@@ -21,7 +28,7 @@ from io import BytesIO
 from herokutl.tl.types import Message
 from herokutl.types import InputMediaWebPage
 
-from .. import loader, main, utils
+from .. import brand, loader, utils
 from .._internal import redact
 from ..inline.types import InlineCall
 
@@ -96,13 +103,13 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "ping_emoji",
-                "🪐",
+                brand.EMOJI,
                 lambda: self.strings["ping_emoji"],
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
                 "banner_url",
-                None,
+                brand.ASSET_BANNER,
                 lambda: self.strings["banner_url"],
                 validator=loader.validators.RandomLink(),
             ),
@@ -351,13 +358,14 @@ class TestMod(loader.Module):
         ghash = utils.get_git_hash()
 
         other = (
-            *main.__version__,
+            brand.display_version(),
             (
                 " <a"
-                f' href="https://github.com/bertffff/Heroku/commit/{ghash}">@{ghash[:8]}</a>'
+                f' href="{brand.REPO_URL}/commit/{ghash}">@{ghash[:8]}</a>'
                 if ghash
                 else ""
             ),
+            brand.UPSTREAM_LABEL,
         )
 
         caption = self.strings["logs_caption"].format(named_lvl, *other)

@@ -12,6 +12,12 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
 import getpass
 import hashlib
 import os
@@ -139,7 +145,7 @@ if (
     and all(trigger not in os.environ for trigger in {"DOCKER", "NO_SUDO"})
 ):
     print("\U0001f6ab" * 15)
-    print("You attempted to run Heroku on behalf of root user")
+    print("You attempted to run Kanjo on behalf of root user")
     print("Please, create a new user and restart script")
     print("If this action was intentional, pass --root argument instead")
     print("\U0001f6ab" * 15)

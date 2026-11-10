@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import time
 import logging
 import herokutl
@@ -18,7 +25,7 @@ from herokutl.errors import WebpageMediaEmptyError
 from herokutl.types import InputMediaWebPage
 from herokutl.tl.types import Message
 from herokutl.utils import get_display_name
-from .. import loader, utils, version
+from .. import brand, loader, utils, version
 import platform as lib_platform
 import getpass
 import re
@@ -51,13 +58,13 @@ class HerokuInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_info.jpg",
+                brand.ASSET_BANNER,
                 lambda: self.strings["_cfg_banner"],
                 validator=loader.validators.RandomLink(),
             ),
             loader.ConfigValue(
                 "ping_emoji",
-                "🪐",
+                brand.EMOJI,
                 lambda: self.strings["ping_emoji"],
                 validator=loader.validators.String(),
             ),
@@ -173,7 +180,10 @@ class HerokuInfoMod(loader.Module):
                     utils.escape_html(get_display_name(self._client.heroku_me)),
                 ).replace("{", "").replace("}", "")
             ),
-            "version": lambda: f'<i>{".".join(map(str, version.__version__))}</i>',
+            "version": lambda: (
+                f"<i>{utils.escape_html(brand.display_version())}</i> "
+                f"<i>({utils.escape_html(brand.UPSTREAM_LABEL)})</i>"
+            ),
             "build": utils.get_commit_url,
             "prefix": lambda: f"«<code>{utils.escape_html(self.get_prefix())}</code>»",
             "platform": utils.get_named_platform,

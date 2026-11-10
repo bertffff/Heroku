@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import contextlib
 import logging
@@ -23,12 +30,12 @@ import signal
 
 import herokutl
 
-from .. import loader, utils
+from .. import brand, loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER_OK = "https://x0.at/grz4.jpg"
-BANNER_BAD = "https://x0.at/4AAH.jpg"
+BANNER_OK = brand.ASSET_LOGO
+BANNER_BAD = brand.ASSET_LOGO
 
 
 def hash_msg(message):

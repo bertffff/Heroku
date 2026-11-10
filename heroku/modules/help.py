@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import difflib
 import inspect
@@ -20,7 +27,7 @@ from herokutl.tl.types import Message
 from herokutl.types import InputMediaWebPage
 
 
-from .. import loader, translations, utils
+from .. import brand, loader, translations, utils
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +46,9 @@ class Help(loader.Module):
             "3. <code>.dlmod &lt;link&gt;</code> loads a module from a link\n"
             "4. <code>.loadmod</code> in reply to a file loads that file\n"
             "5. <code>.unloadmod &lt;module&gt;</code> unloads a module\n\n"
-            "Heroku still loads Hikka, FTG, and GeekTG modules. "
-            "Pick a language below. Only English and Russian are built in."
+            "Kanjo still loads Hikka, FTG, Heroku and GeekTG modules. "
+            "Pick a language below. Only English and Russian are built in.\n\n"
+            + brand.ATTRIBUTION
         ),
         "onboarding_saved": "Language saved",
     }
@@ -53,8 +61,9 @@ class Help(loader.Module):
             "3. <code>.dlmod &lt;ссылка&gt;</code> — модуль по ссылке\n"
             "4. <code>.loadmod</code> ответом на файл — модуль из файла\n"
             "5. <code>.unloadmod &lt;модуль&gt;</code> — выгрузить модуль\n\n"
-            "Совместимость с модулями Hikka, FTG и GeekTG сохранена. "
-            "Ниже можно выбрать язык. В сборке есть только русский и английский."
+            "Модули Hikka, FTG, Heroku и GeekTG по-прежнему подходят. "
+            "Ниже можно выбрать язык. В сборке есть только русский и английский.\n\n"
+            + brand.ATTRIBUTION
         ),
         "onboarding_saved": "Язык сохранён",
     }
@@ -78,7 +87,7 @@ class Help(loader.Module):
             ),
             loader.ConfigValue(
                 "desc_icon",
-                "<tg-emoji emoji-id=5188377234380954537>🪐</tg-emoji>",
+                brand.EMOJI,
                 lambda: "Desc emoji",
             ),
             loader.ConfigValue(
@@ -88,7 +97,7 @@ class Help(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                None,
+                brand.ASSET_BANNER,
                 lambda: "Banner for .help",
                 validator=loader.validators.RandomLink(),
             ),
@@ -180,8 +189,14 @@ class Help(loader.Module):
                             reversed(
                                 sorted(
                                     [
-                                        module.strings["name"]
+                                        name
                                         for module in self.allmodules.modules
+                                        for name in {
+                                            getattr(module, "name", None)
+                                            or module.strings["name"],
+                                            brand.module_public_name(module),
+                                        }
+                                        if name
                                     ],
                                     key=lambda x: difflib.SequenceMatcher(
                                         None,
@@ -198,7 +213,7 @@ class Help(loader.Module):
                 exact = False
 
         try:
-            name = module.strings("name")
+            name = brand.module_public_name(module)
         except (KeyError, AttributeError):
             name = getattr(module, "name", "ERROR")
 
@@ -211,7 +226,7 @@ class Help(loader.Module):
         )
 
         reply = "{} <b>{}</b>:".format(
-            "<tg-emoji emoji-id=5134452506935427991>🪐</tg-emoji>",
+            "🎴",
             _name,
         )
         inline_cmd = ""
@@ -417,7 +432,7 @@ class Help(loader.Module):
             tmp = ""
 
             try:
-                name = mod.strings["name"]
+                name = brand.module_public_name(mod)
             except KeyError:
                 name = getattr(mod, "name", "ERROR")
 
@@ -517,7 +532,7 @@ class Help(loader.Module):
                     if self.config["banner_url"]
                     else ""
                 )
-                + f"{self.config['desc_icon']} {reply}" 
+                + f"{self.config['desc_icon']} {reply}"
             )
             rich_core = "".join(f"<p>{item.strip()}</p>" for item in core_)
             rich_modules = "".join(
@@ -619,11 +634,7 @@ class Help(loader.Module):
 
         await self.inline.bot.send_message(
             self._client.tg_id,
-            self.strings["onboarding"].format(
-                utils.get_platform_emoji()
-                if getattr(self._client.heroku_me, "premium", False)
-                else "Heroku"
-            ),
+            self.strings["onboarding"].format("Kanjo"),
             reply_markup=self.inline.generate_markup(self._onboarding_markup()),
             disable_web_page_preview=True,
         )

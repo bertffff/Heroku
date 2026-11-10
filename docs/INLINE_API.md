@@ -1,10 +1,16 @@
 # Inline bot API additions
 
-These kwargs and button keys are opt-in. Omitting them keeps the previous
-Hikka/FTG behaviour. The inline bot speaks MTProto through herokutl 2.2.1
-(layer 230), not the HTTP Bot API. A rejection that names the new flag is
-retried without it. `FloodWait` is never retried. Dropping `protect_content`
-is logged as a warning; other flag fallbacks are debug.
+[English](INLINE_API.md) · [Русский](INLINE_API.ru.md)
+
+Kanjo's inline bot is the Heroku/Hikka inline manager. These kwargs and
+button keys are opt-in. Omitting them keeps the previous Hikka/FTG behaviour.
+The bot speaks MTProto through herokutl 2.2.1 (layer 230), not the HTTP Bot
+API. A rejection that names the new flag is retried without it. `FloodWait`
+is never retried. Dropping `protect_content` is logged as a warning; other
+flag fallbacks are debug.
+
+`self.inline`, `@loader.tds`, `heroku.inline` in the database, and
+`from .. import loader, utils` are unchanged. See [MODULES.md](MODULES.md).
 
 Widgets from Bot API 10.4 are not in this layer, so they are not exposed.
 

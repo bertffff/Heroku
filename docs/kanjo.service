@@ -1,0 +1,21 @@
+[Unit]
+Description=Kanjo userbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kanjo
+Group=kanjo
+WorkingDirectory=/opt/kanjo
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/kanjo/account.env
+ExecStart=/opt/kanjo/.venv/bin/python -m kanjo --data-root /var/lib/kanjo
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

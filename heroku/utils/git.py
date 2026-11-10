@@ -4,8 +4,14 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import logging
-import os
 import subprocess
 from typing import Literal
 
@@ -19,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 def _is_no_git() -> bool:
-    return os.environ.get("HEROKU_NO_GIT") == "1"
+    from ..brand import env_flag
+
+    return env_flag("NO_GIT")
 
 
 # GeekTG Compatibility
@@ -30,11 +38,10 @@ def get_git_info() -> tuple[str, str]:
     """
     if _is_no_git():
         return ("", "")
+    from ..brand import REPO_URL
+
     hash_ = get_git_hash() or ""
-    return (
-        hash_,
-        f"https://github.com/bertffff/Heroku/commit/{hash_}" if hash_ else "",
-    )
+    return (hash_, f"{REPO_URL}/commit/{hash_}" if hash_ else "")
 
 
 def get_git_hash() -> str | Literal[False]:
@@ -62,7 +69,9 @@ def get_commit_url() -> str:
         hash_ = get_git_hash()
         if not hash_:
             return "Unknown"
-        return f'<a href="https://github.com/bertffff/Heroku/commit/{hash_}">#{hash_[:7]}</a>'
+        from ..brand import REPO_URL
+
+        return f'<a href="{REPO_URL}/commit/{hash_}">#{hash_[:7]}</a>'
     except Exception:
         return "Unknown"
 

@@ -1,16 +1,18 @@
 services:
-  heroku:
+  kanjo:
     build:
       context: .
-    image: heroku:local
+    image: kanjo:local
     environment:
-      HEROKU_TRANSPORT: ${HEROKU_TRANSPORT:-auto}
+      # HEROKU_TRANSPORT wins when it is set. KANJO_TRANSPORT is the alias.
+      HEROKU_TRANSPORT: ${HEROKU_TRANSPORT:-${KANJO_TRANSPORT:-auto}}
       # Empty values are ignored. Put api_id and api_hash in a .env file
       # next to this compose file, or log in once and leave them in
       # config.json on the volume. Do not bake them into the image.
       api_id: ${api_id:-}
       api_hash: ${api_hash:-}
     volumes:
+      # Volume key stays heroku-data so an existing compose volume is reused.
       - heroku-data:/data
     restart: unless-stopped
     init: true

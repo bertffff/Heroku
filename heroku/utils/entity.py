@@ -4,6 +4,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import inspect
 import logging
@@ -245,6 +252,64 @@ async def is_private_asset_channel(client, peer, *, allow_participants: bool = F
         return False
 
 
+def folder_includes_user(folder, user_id: int) -> bool:
+    """True when the dialog folder already lists this user.
+
+    Telethon stores members on ``include_peers``. ``include_peer`` is not
+    an attribute and raises AttributeError on every startup once the
+    folder title matches.
+    """
+    from herokutl.tl.types import InputPeerUser
+
+    peers = getattr(folder, "include_peers", None) or []
+    return any(
+        isinstance(peer, InputPeerUser) and getattr(peer, "user_id", None) == user_id
+        for peer in peers
+    )
+
+
+def attach_bot_to_folder(folder, bot_peer):
+    """Add the inline bot to an existing dialog folder.
+
+    The same filter object is returned. Building a new ``DialogFilter``
+    drops required fields such as ``title`` and raises ``TypeError``.
+    """
+    peers = list(getattr(folder, "include_peers", None) or [])
+    peers.append(bot_peer)
+    folder.include_peers = peers
+    return folder
+
+
+def _folder_label(folder) -> str:
+    title = getattr(folder, "title", None)
+    text = getattr(title, "text", title)
+    return str(text or "").strip().lower()
+
+
+def _matching_dialog_folder(folders, requested: str | None):
+    """Folder named like the request. Heroku and Kanjo share one slot.
+
+    If both folders exist, the older Heroku folder is reused.
+    """
+    from ..brand import ASSET_FOLDER_TITLES
+
+    if not requested:
+        return None
+    wanted = {requested.lower()}
+    if requested.lower() in ASSET_FOLDER_TITLES:
+        wanted = set(ASSET_FOLDER_TITLES)
+    matches = []
+    for folder in folders or []:
+        if isinstance(folder, herokutl.tl.types.DialogFilterDefault):
+            continue
+        if _folder_label(folder) in wanted:
+            matches.append(folder)
+    if not matches:
+        return None
+    matches.sort(key=lambda folder: (0 if _folder_label(folder) == "heroku" else 1))
+    return matches[0]
+
+
 async def asset_channel(
     client: CustomTelegramClient,
     title: str,
@@ -350,15 +415,7 @@ async def asset_channel(
     if _folder:
         folders = (await client(GetDialogFiltersRequest())).filters
 
-        try:
-            folder = next(
-                folder
-                for folder in folders
-                if not isinstance(folder, herokutl.tl.types.DialogFilterDefault)
-                and folder.title.text.lower() == _folder.lower()
-            )
-        except Exception:
-            folder = None
+        folder = _matching_dialog_folder(folders, _folder)
 
         if folder and not any(
             peer.id == getattr(folder_peer, "channel_id", None)
@@ -506,7 +563,9 @@ async def get_topic_id(db: "Database", topic_name: str) -> int | None:
     """
     try:
         forums_cache = db.get("heroku.forums", "forums_cache", {})
-        return forums_cache.get("heroku-userbot", {}).get(topic_name)
+        from ..brand import asset_topic_id
+
+        return asset_topic_id(forums_cache, topic_name)
     except Exception:
         return None
 

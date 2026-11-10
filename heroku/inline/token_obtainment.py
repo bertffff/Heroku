@@ -10,9 +10,14 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
 import asyncio
 import logging
-import random
 import re
 import typing
 from pathlib import Path
@@ -79,8 +84,6 @@ class TokenObtainment(InlineUnit):
             await m.delete()
             await r.delete()
 
-            from .. import main
-
             if self._db.get("heroku.inline", "custom_bot", False):
                 username = self._db.get("heroku.inline", "custom_bot").strip("@")
                 username = f"@{username}"
@@ -90,19 +93,17 @@ class TokenObtainment(InlineUnit):
                     pass
                 else:
                     uid = utils.rand(6)
-                    genran = "".join(random.choice(main.LATIN_MOCK))
-                    username = f"@{genran}_{uid}_bot"
+                    username = f"@kanjo_{uid}_bot"
             else:
                 uid = utils.rand(6)
-                genran = "".join(random.choice(main.LATIN_MOCK))
-                username = f"@{genran}_{uid}_bot"
+                username = f"@kanjo_{uid}_bot"
 
             for msg in [
-                "🪐 Heroku userbot"[:64],
+                "🎴 Kanjo userbot"[:64],
                 username,
                 "/setinline",
                 username,
-                "user@heroku:~$",
+                "user@kanjo:~$",
                 "/setinlinefeedback",
                 username,
                 "Enabled",
@@ -129,7 +130,7 @@ class TokenObtainment(InlineUnit):
             try:
                 await fw_protect()
                 m = await conv.send_file(
-                    Path(__file__).resolve().parents[2] / "assets" / "heroku.jpeg"
+                    Path(__file__).resolve().parents[2] / "assets" / "logo.png"
                 )
                 r = await conv.get_response()
 
@@ -213,7 +214,10 @@ class TokenObtainment(InlineUnit):
 
                     if not self._db.get("heroku.inline", "custom_bot", False) and not (
                         (match := BOT_BASE_PATTERN.fullmatch(btn_text))
-                        and match.group(1) in main.LATIN_MOCK
+                        and (
+                            match.group(1) == "kanjo"
+                            or match.group(1) in main.LATIN_MOCK
+                        )
                     ):
                         continue
 
@@ -264,7 +268,7 @@ class TokenObtainment(InlineUnit):
                     for msg in [
                         "/setinline",
                         button.text,
-                        "user@heroku:~$",
+                        "user@kanjo:~$",
                         "/setinlinefeedback",
                         button.text,
                         "Enabled",
@@ -286,9 +290,7 @@ class TokenObtainment(InlineUnit):
                     try:
                         await fw_protect()
                         m = await conv.send_file(
-                            Path(__file__).resolve().parents[2]
-                            / "assets"
-                            / "heroku.jpeg"
+                            Path(__file__).resolve().parents[2] / "assets" / "logo.png"
                         )
                         r = await conv.get_response()
 
@@ -318,7 +320,7 @@ class TokenObtainment(InlineUnit):
             for msg in [
                 "/setinline",
                 username,
-                "user@heroku:~$",
+                "user@kanjo:~$",
                 "/setinlinefeedback",
                 username,
                 "Enabled",

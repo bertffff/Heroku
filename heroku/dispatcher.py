@@ -12,6 +12,12 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
 import asyncio
 import collections
 import contextlib
@@ -473,7 +479,9 @@ class CommandDispatcher:
         buttons = []
         for handler in handlers:
             module = handler.__self__
-            name = module.strings["name"]
+            from .brand import module_public_name
+
+            name = module_public_name(module)
             buttons.append([{
                 "text": name,
                 "emoji_id": "5872695159631647090",

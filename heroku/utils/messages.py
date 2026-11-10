@@ -4,6 +4,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import contextlib
 import io
 import json
@@ -345,14 +352,78 @@ async def _edit_inline_rich_message(
     return message
 
 
+def is_remote_media_failure(error: BaseException) -> bool:
+    """True when a photo or webpage URL could not be fetched.
+
+    Flood waits are not media failures. ``WebpageCurlFailedError`` and
+    ``WebpageMediaEmptyError`` are, along with the rich-message media errors.
+    """
+    if type(error).__name__ in {"FloodWaitError", "FloodPremiumWaitError"}:
+        return False
+    name = type(error).__name__
+    if (
+        isinstance(error, WebpageMediaEmptyError)
+        or "Webpage" in name
+        or "Curl" in name
+        or "MediaEmpty" in name
+    ):
+        return True
+    message = getattr(error, "message", None)
+    if message in {"RICH_MESSAGE_PHOTO_NO_MEDIA_FOUND", "EXTERNAL_MEDIA_NOT_SUPPORTED"}:
+        return True
+    text = str(error).lower()
+    return "curl" in text or "webpage" in text or "failed to get http" in text
+
+
+def local_file_for_photo(photo) -> str | None:
+    """Local ``assets`` file to try after a remote banner URL fails."""
+    from ..brand import local_asset
+
+    url = photo if isinstance(photo, str) else None
+    if url is None:
+        for attr in ("url", "webpage"):
+            value = getattr(photo, attr, None)
+            if isinstance(value, str):
+                url = value
+                break
+    name = "banner.png"
+    if isinstance(url, str):
+        leaf = url.rsplit("/", 1)[-1].split("?", 1)[0]
+        if leaf in {"banner.png", "logo.png", "favicon.png"}:
+            name = leaf
+    path = local_asset(name)
+    if path.is_file():
+        return str(path)
+    return None
+
+
 async def answer_with_media_fallback(message, *args, **kwargs):
     try:
         return await answer(message, *args, **kwargs)
-    except RPCError as error:
-        if not isinstance(error, WebpageMediaEmptyError) and getattr(
-            error, "message", None
-        ) not in {"RICH_MESSAGE_PHOTO_NO_MEDIA_FOUND", "EXTERNAL_MEDIA_NOT_SUPPORTED"}:
+    except Exception as error:
+        if not is_remote_media_failure(error):
             raise
+        file = kwargs.get("file")
+        local = local_file_for_photo(file) if file else None
+        if local and local != file:
+            kwargs["file"] = local
+            try:
+                return await answer(message, *args, **kwargs)
+            except Exception as retry_error:
+                if type(retry_error).__name__ in {
+                    "FloodWaitError",
+                    "FloodPremiumWaitError",
+                }:
+                    raise
+                logger.warning(
+                    "Local banner failed (%s); sending without a photo",
+                    type(retry_error).__name__,
+                )
+        elif file:
+            logger.warning(
+                "Banner URL failed (%s); sending without a photo",
+                type(error).__name__,
+            )
         rich_message = kwargs.get("rich_message")
         if rich_message:
             without_images = re.sub(
@@ -361,15 +432,45 @@ async def answer_with_media_fallback(message, *args, **kwargs):
                 rich_message,
                 flags=re.IGNORECASE,
             )
-            if without_images == rich_message:
+            if without_images != rich_message:
+                kwargs["rich_message"] = without_images
+            elif not file:
                 raise
-            kwargs["rich_message"] = without_images
-        elif not kwargs.get("file"):
+        elif not file and not local:
             raise
         kwargs.pop("file", None)
         kwargs.pop("invert_media", None)
         kwargs["link_preview"] = False
     return await answer(message, *args, **kwargs)
+
+
+async def send_photo_resilient(send_photo, photo, *, send_text):
+    """Send ``photo``, then the local asset, then text with no photo.
+
+    ``send_photo`` is ``async (file) -> result``. ``send_text`` is used when
+    both the remote URL and the local file fail. Flood waits propagate.
+    """
+    try:
+        return await send_photo(photo)
+    except Exception as error:
+        if not is_remote_media_failure(error):
+            raise
+        logger.warning(
+            "Banner URL failed (%s); trying the local asset",
+            type(error).__name__,
+        )
+    local = local_file_for_photo(photo)
+    if local and local != photo:
+        try:
+            return await send_photo(local)
+        except Exception as error:
+            if type(error).__name__ in {"FloodWaitError", "FloodPremiumWaitError"}:
+                raise
+            logger.warning(
+                "Local banner failed (%s); sending without a photo",
+                type(error).__name__,
+            )
+    return await send_text()
 
 
 async def answer(

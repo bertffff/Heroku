@@ -32,7 +32,7 @@ if ! [ -x "$(command -v docker-compose)" ]; then
         sudo yum install docker-ce docker-ce-cli containerd.io -y 1>heroku-install.log 2>&1
     fi
     printf "\033[0;32m - success\e[0m\n"
-    # Heroku uses docker-compose so we need to install that too
+    # Kanjo uses docker-compose so we need to install that too
     printf "\033[0;34mInstalling docker-compose...\e[0m"
     pip install -U docker-compose 1>heroku-install.log 2>&1
     chmod +x /usr/local/bin/docker-compose
@@ -45,5 +45,5 @@ printf "\033[0;34mBuilding docker image...\e[0m"
 sudo docker-compose build 1>heroku-install.log 2>&1
 printf "\033[0;32m - success\e[0m\n"
 
-printf "\033[0;32mStarting Heroku setup in console mode...\e[0m\n"
-sudo docker-compose run --rm heroku
+printf "\033[0;32mStarting Kanjo setup in console mode...\e[0m\n"
+sudo docker-compose run --rm kanjo

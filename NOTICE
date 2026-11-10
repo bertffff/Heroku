@@ -1,0 +1,19 @@
+Kanjo is based on Heroku Userbot (github.com/coddrago/Heroku), itself a fork of Hikka (github.com/hikariatama/Hikka); licensed AGPL-3.0.
+
+Copyright (C) 2021-2023 Dan Gazizullin
+Copyright (C) 2024-2030 Codrago
+Copyright (C) 2026 bertffff and Kanjo contributors
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+The license text is in the file LICENSE. Copyright lines in the source files
+are kept. The Kanjo line is added beside the Hikka and Heroku lines; it does
+not replace them.
+
+The import package is still named heroku so that existing modules, database
+keys and `python -m heroku` keep working. The user-facing name is Kanjo.
+The Git remote this tree updates from is https://github.com/bertffff/Heroku
+(heroku/brand.py, REPO_URL).

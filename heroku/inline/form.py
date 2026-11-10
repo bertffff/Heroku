@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import contextlib
 import copy
 import logging
@@ -48,7 +55,7 @@ VERIFICATION_EMOJIES = list(
         "🦀🐡🐠🐟🐅🐊🦭🦈🐋🐳🐬🐆🦓🦍🦧🦣🐘🦛🐃🦬🦘🦒🐫🐪🦏"
         "🐂🐄🐎🐖🐏🐑🦙🐈🐕‍🦺🦮🐩🐕🦌🐐🐈‍⬛🪶🐓🦃🦤🦚🦜🦡🦨🦝🐇"
         "🕊🦩🦢🦫🦦🦥🐁🐀🐿🦔🌳🌲🌵🐲🐉🐾🎋🍂🍁🍄🐚🌾🪨💐🌷"
-        "🥀🌺🌸🌻🌞🌜🌘🌗🌎🪐💫⭐️✨⚡️☄️💥☀️🌪🔥🌈🌤⛅️❄️⛄️🌊"
+        "🥀🌺🌸🌻🌞🌜🌘🌗🌎🎴💫⭐️✨⚡️☄️💥☀️🌪🔥🌈🌤⛅️❄️⛄️🌊"
         "☂️🍏🍎🍐🍊🍋🍌🍉🥭🍑🍒🍈🫐🍓🍇🍍🥥🥝🍅🥑🥦🧔‍♂️"
     )
 )
@@ -326,7 +333,7 @@ class Form(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.heroku_me.premium
-                        else "🪐"
+                        else "🎴"
                     )
                     + self.translator.getkey("inline.opening_form"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -536,7 +543,7 @@ class Form(InlineUnit):
             return
 
         form = self._units[inline_query.query]
-        form_text = "🪐" if form.get("premium_emoji_pre_edit") else form.get("text")
+        form_text = "🎴" if form.get("premium_emoji_pre_edit") else form.get("text")
         invert_caption = bool(form.get("invert_media"))
 
         def buttons_for(source):
@@ -555,7 +562,7 @@ class Form(InlineUnit):
                     await inline_query.answer(
                         [
                             await inline_query.rich_article(
-                                title="Heroku",
+                                title="Kanjo",
                                 html=rich_value,
                                 buttons=buttons_for(form["uid"]),
                                 id=utils.rand(20),
@@ -580,7 +587,7 @@ class Form(InlineUnit):
                     await answer_result(
                         await inline_query.builder.document(
                             form["gif"],
-                            title="Heroku",
+                            title="Kanjo",
                             type="gif",
                             id=utils.rand(20),
                             text=form_text,
@@ -595,8 +602,8 @@ class Form(InlineUnit):
                     await answer_result(
                         await inline_query.builder.document(
                             form["video"],
-                            title="Heroku",
-                            description="Heroku",
+                            title="Kanjo",
+                            description="Kanjo",
                             type="video",
                             id=utils.rand(20),
                             text=form_text,
@@ -612,8 +619,8 @@ class Form(InlineUnit):
                     await answer_result(
                         await inline_query.builder.document(
                             form["file"],
-                            title="Heroku",
-                            description="Heroku",
+                            title="Kanjo",
+                            description="Kanjo",
                             id=utils.rand(20),
                             text=form_text,
                             parse_mode="HTML",
@@ -628,7 +635,7 @@ class Form(InlineUnit):
                     await inline_query.answer(
                         [
                             await inline_query.builder.article(
-                                title="Heroku",
+                                title="Kanjo",
                                 geo=InputGeoPoint(
                                     lat=form["location"][0],
                                     long=form["location"][1],
@@ -646,7 +653,7 @@ class Form(InlineUnit):
                     await answer_result(
                         await inline_query.builder.document(
                             form["audio"]["url"],
-                            title=form["audio"].get("title", "Heroku"),
+                            title=form["audio"].get("title", "Kanjo"),
                             type="audio",
                             id=utils.rand(20),
                             text=form_text,
@@ -664,7 +671,7 @@ class Form(InlineUnit):
                     if preview["mode"] == "webpage":
                         await answer_result(
                             await inline_query.webpage_article(
-                                title="Heroku",
+                                title="Kanjo",
                                 text=form_text,
                                 url=preview["url"],
                                 preview_size=preview.get("size"),
@@ -676,7 +683,7 @@ class Form(InlineUnit):
                     else:
                         await answer_result(
                             await inline_query.builder.article(
-                                title="Heroku",
+                                title="Kanjo",
                                 text=form_text,
                                 parse_mode="HTML",
                                 link_preview=bool(preview.get("show")),

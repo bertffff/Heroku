@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import collections
 import copy
@@ -31,7 +38,7 @@ import typing
 
 from herokutl.tl.types import Message, User
 
-from . import main, utils
+from . import brand, main, utils
 from ._internal import private_write, register_secrets
 from .pointers import (
     BaseSerializingMiddlewareDict,
@@ -149,33 +156,38 @@ class Database(dict):
                     f"Saved channel ID {existing_channel_id} not found or inaccessible: {e}"
                 )
                 content_channel = None
-                self.set("heroku.forums", "forums_cache", {"heroku-userbot": {}})
+                self.set("heroku.forums", "forums_cache", brand.empty_forums_cache())
 
         if not content_channel:
+            # "heroku-userbot" is the channel title from before the Kanjo rebrand.
+            found = {}
             async for dialog in self._client.iter_dialogs():
-                if (
-                    dialog.title == "heroku-userbot"
-                    and await utils.is_private_asset_channel(
-                        self._client, dialog.entity, allow_participants=True
-                    )
+                title = (dialog.title or "").lower()
+                if title not in brand.ASSET_CHANNEL_TITLES:
+                    continue
+                if not await utils.is_private_asset_channel(
+                    self._client, dialog.entity, allow_participants=True
                 ):
-                    content_channel = dialog.entity
-                    logger.debug(
-                        "Found existing channel '%s' with ID %s",
-                        dialog.title,
-                        dialog.entity.id,
-                    )
-                    self.set("heroku.forums", "channel_id", int(dialog.entity.id))
-                    break
+                    continue
+                found.setdefault(title, dialog.entity)
+            entity = brand.preferred_asset_channel(found)
+            if entity is not None:
+                content_channel = entity
+                logger.debug(
+                    "Found existing channel '%s' with ID %s",
+                    getattr(entity, "title", None),
+                    entity.id,
+                )
+                self.set("heroku.forums", "channel_id", int(entity.id))
 
         if not content_channel:
             content_channel, _ = await utils.asset_channel(
                 client=self._client,
-                title="heroku-userbot",
-                description="🪐 Content related to Heroku will be here",
+                title="kanjo-userbot",
+                description="🎴 Kanjo. " + brand.ATTRIBUTION,
                 silent=True,
                 invite_bot=True,
-                avatar="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku.jpg",
+                avatar=brand.ASSET_LOGO,
                 forum=True,
                 hide_general=True,
                 _folder="heroku",
@@ -403,11 +415,11 @@ class Database(dict):
         returns asset_id as integer
         """
 
-        try:
-            _assets_topic_id = self.get("heroku.forums", "forums_cache", {})[
-                "heroku-userbot"
-            ]["Assets"]
-        except (TypeError, KeyError):
+        _assets_topic_id = brand.asset_topic_id(
+            self.get("heroku.forums", "forums_cache", {}),
+            "Assets",
+        )
+        if not _assets_topic_id:
             raise NoAssetsChannel("Tried to save asset to non-existing asset topic.")
 
         if not (_content_channel_id := self.get("heroku.forums", "channel_id", None)):
@@ -440,11 +452,11 @@ class Database(dict):
                 "Tried to save asset with non-existing content channel."
             )
 
-        try:
-            _assets_topic_id = self.get("heroku.forums", "forums_cache", {})[
-                "heroku-userbot"
-            ]["Assets"]
-        except (TypeError, KeyError):
+        _assets_topic_id = brand.asset_topic_id(
+            self.get("heroku.forums", "forums_cache", {}),
+            "Assets",
+        )
+        if not _assets_topic_id:
             raise NoAssetsChannel("Tried to save asset to non-existing asset topic.")
 
         asset = await self._client.get_messages(
