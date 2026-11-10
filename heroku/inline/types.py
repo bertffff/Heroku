@@ -2,7 +2,10 @@ import logging
 import secrets
 import typing
 
+from herokutl import utils as tl_utils
+from herokutl.errors.rpcbaseerrors import RPCError
 from herokutl.tl import types
+from herokutl.tl.functions import ephemeral
 
 from .._internal import normalize_rich_html
 
@@ -117,6 +120,9 @@ class _MessageProxy:
             reply_markup=kwargs.get("reply_markup"),
             message_thread_id=kwargs.get("message_thread_id"),
             rich_message=kwargs.get("rich_message"),
+            protect_content=kwargs.get("protect_content"),
+            message_effect_id=kwargs.get("message_effect_id"),
+            disable_notification=kwargs.get("disable_notification"),
         )
 
     async def answer_photo(
@@ -128,6 +134,8 @@ class _MessageProxy:
             caption=caption,
             reply_markup=reply_markup,
             message_thread_id=kwargs.get("message_thread_id"),
+            protect_content=kwargs.get("protect_content"),
+            message_effect_id=kwargs.get("message_effect_id"),
         )
 
     async def edit_text(self, text: str, *, reply_markup=None, **kwargs):
@@ -181,6 +189,9 @@ class BotInlineMessage:
             reply_markup=kwargs.get("reply_markup"),
             message_thread_id=kwargs.get("message_thread_id"),
             rich_message=kwargs.get("rich_message"),
+            protect_content=kwargs.get("protect_content"),
+            message_effect_id=kwargs.get("message_effect_id"),
+            disable_notification=kwargs.get("disable_notification"),
         )
 
     async def answer_photo(
@@ -192,6 +203,8 @@ class BotInlineMessage:
             caption=caption,
             reply_markup=reply_markup,
             message_thread_id=kwargs.get("message_thread_id"),
+            protect_content=kwargs.get("protect_content"),
+            message_effect_id=kwargs.get("message_effect_id"),
         )
 
     async def edit(self, *args, **kwargs) -> "BotMessage":
@@ -282,6 +295,132 @@ class _CallbackMixin:
             cache_time=kwargs.get("cache_time", 0),
             url=kwargs.get("url"),
         )
+
+    async def _ephemeral_receiver(self, client):
+        call = self.original_call
+        getter = getattr(call, "get_input_sender", None)
+        if getter is not None:
+            try:
+                peer = await getter()
+                if peer is not None:
+                    return tl_utils.get_input_user(peer)
+            except Exception:
+                logger.debug(
+                    "get_input_sender failed for an ephemeral reply", exc_info=True
+                )
+
+        peer = await client.get_input_entity(self.sender_id)
+        return tl_utils.get_input_user(peer)
+
+    async def answer_ephemeral(
+        self,
+        text: str = "",
+        *,
+        rich_message=None,
+        replace: bool = False,
+        reply_markup=None,
+    ):
+        """Reply to this button press with a message only the presser can see.
+
+        The callback query is still answered afterwards. ``replace=True`` sets
+        the experimental MTProto ``anchor`` flag (Bot API
+        ``replace_callback_query_message`` is not a confirmed mapping). Any RPC
+        failure falls back to an alert answer of at most 200 characters.
+        Delivery of ephemeral messages is not guaranteed, especially offline.
+        """
+        from .tl import TelethonBot
+
+        client = self.inline_manager._bot_client
+
+        async def _send(anchor: bool):
+            receiver = await self._ephemeral_receiver(client)
+            peer = None
+            if self.chat_id:
+                try:
+                    peer = await client.get_input_entity(self.chat_id)
+                except Exception:
+                    logger.debug("Ephemeral peer is unresolved", exc_info=True)
+
+            plain = text or ""
+            entities = None
+            rich = None
+            if rich_message is not None:
+                if isinstance(rich_message, str):
+                    rich = TelethonBot._rich_input(html=rich_message)
+                    plain = text or TelethonBot._rich_fallback_text(html=rich_message)
+                else:
+                    rich = rich_message
+                    plain = text or TelethonBot._rich_fallback_text(
+                        rich_message=rich_message
+                    )
+            else:
+                try:
+                    plain, entities = await client._parse_message_text(plain, "html")
+                except Exception:
+                    logger.debug("Ephemeral HTML parse failed", exc_info=True)
+                    entities = None
+
+            markup = None
+            if reply_markup is not None:
+                if hasattr(reply_markup, "SUBCLASS_OF_ID"):
+                    markup = reply_markup
+                else:
+                    generated = self.inline_manager.generate_markup(reply_markup)
+                    markup = client.build_reply_markup(generated)
+
+            try:
+                query_id = int(self.id)
+            except (TypeError, ValueError):
+                query_id = None
+
+            return await client(
+                ephemeral.SendMessageRequest(
+                    receiver_id=receiver,
+                    message=plain or "",
+                    query_id=query_id,
+                    peer=peer,
+                    entities=entities,
+                    rich_message=rich,
+                    reply_markup=markup,
+                    anchor=True if anchor else None,
+                )
+            )
+
+        try:
+            await _send(replace)
+        except RPCError:
+            if replace:
+                logger.debug(
+                    "Ephemeral anchor/replace was rejected; retrying without it",
+                    exc_info=True,
+                )
+                try:
+                    await _send(False)
+                except RPCError:
+                    logger.debug(
+                        "Ephemeral answer is unsupported; falling back to an alert",
+                        exc_info=True,
+                    )
+                    return await self.answer((text or "")[:200], show_alert=True)
+            else:
+                logger.debug(
+                    "Ephemeral answer is unsupported; falling back to an alert",
+                    exc_info=True,
+                )
+                return await self.answer((text or "")[:200], show_alert=True)
+        except Exception:
+            logger.debug(
+                "Ephemeral answer failed; falling back to an alert", exc_info=True
+            )
+            return await self.answer((text or "")[:200], show_alert=True)
+
+        try:
+            await self.original_call.answer()
+        except Exception:
+            logger.debug(
+                "answerCallbackQuery after an ephemeral reply failed", exc_info=True
+            )
+        return True
 
 
 class InlineCall(_CallbackMixin, InlineMessage):
@@ -388,6 +527,52 @@ class InlineQuery:
             description=description,
             send_message=types.InputBotInlineMessageRichMessage(
                 rich_message=rich_message,
+                reply_markup=markup,
+            ),
+        )
+
+    async def webpage_article(
+        self,
+        title: str,
+        text: str,
+        url: str,
+        *,
+        preview_size: str | None = None,
+        preview_above: bool = False,
+        description: str | None = None,
+        id: str | None = None,
+        buttons=None,
+    ):
+        """Article result whose link preview is an explicit webpage.
+
+        ``optional=True`` keeps a bad URL from failing the whole inline answer.
+        ``builder.article`` cannot set the size or above-text flags.
+        """
+        from herokutl.extensions import html as html_parser
+
+        plain, entities = html_parser.parse(text or "")
+        markup = (
+            self.inline_query.builder._client.build_reply_markup(buttons)
+            if buttons is not None
+            else None
+        )
+        if preview_size not in (None, "large", "small"):
+            logger.debug("Ignoring invalid preview_size %r", preview_size)
+            preview_size = None
+
+        return types.InputBotInlineResult(
+            id=id or secrets.token_urlsafe(15),
+            type="article",
+            title=title,
+            description=description,
+            send_message=types.InputBotInlineMessageMediaWebPage(
+                message=plain or " ",
+                entities=entities or None,
+                url=url,
+                force_large_media=True if preview_size == "large" else None,
+                force_small_media=True if preview_size == "small" else None,
+                invert_media=True if preview_above else None,
+                optional=True,
                 reply_markup=markup,
             ),
         )

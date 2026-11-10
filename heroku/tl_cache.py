@@ -490,10 +490,15 @@ class CustomTelegramClient(TelegramClient):
         reply_to: int | None = None,
     ):
         input_entity = await self.get_input_entity(entity)
+        try:
+            receiver = tl_utils.get_input_user(receiver_id)
+        except (TypeError, AttributeError):
+            receiver_peer = await self.get_input_entity(receiver_id)
+            receiver = tl_utils.get_input_user(receiver_peer)
         return await self(
             functions.ephemeral.SendMessageRequest(
                 peer=input_entity,
-                receiver_id=receiver_id,
+                receiver_id=receiver,
                 message="",
                 reply_to=(
                     InputReplyToMessage(reply_to) if reply_to is not None else None

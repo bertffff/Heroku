@@ -30,6 +30,7 @@ from herokutl.tl.types import InputGeoPoint, Message
 from .. import main, utils
 from .._internal import tag_client_id
 from ..types import HerokuReplyMarkup
+from .tl import apply_invert_media
 from .types import InlineMessage, InlineUnit
 
 if typing.TYPE_CHECKING:
@@ -81,6 +82,10 @@ class Form(InlineUnit):
         rich_message: typing.Any = None,
         silent: bool = False,
         reply_to: Message | int | None = None,
+        link_preview: str | bool | None = None,
+        preview_size: typing.Literal["large", "small"] | None = None,
+        preview_above: bool = False,
+        invert_media: bool = False,
     ) -> InlineMessage | bool:
         """
         Send inline form to chat
@@ -111,6 +116,12 @@ class Form(InlineUnit):
         :param silent: Whether the form must be sent silently (w/o "Opening form..." message)
         :param reply_to: Message or message ID to reply to. If passed, the form will be sent
                          as a reply to this message
+        :param link_preview: ``None``/``False`` keeps previews off. ``True`` enables the
+                             preview Telegram picks from the text. A URL forces that page.
+        :param preview_size: ``"large"`` or ``"small"`` webpage preview
+        :param preview_above: Draw the link preview above the text
+        :param invert_media: Draw the caption above attached media. Ignored for rich forms,
+                             which have no media caption flag.
         :return: If form is sent, returns :obj:`InlineMessage`, otherwise returns `False`
         """
         if reply_markup is None:
@@ -230,6 +241,38 @@ class Form(InlineUnit):
             )
             return False
 
+        if link_preview not in (None, False) and not isinstance(link_preview, (str, bool)):
+            logger.error(
+                "Invalid type for `link_preview`. Expected `str`, `bool` or `None`, got `%s`",
+                type(link_preview),
+            )
+            return False
+
+        if isinstance(link_preview, str) and not utils.check_url(link_preview):
+            logger.error("Invalid URL for `link_preview`")
+            return False
+
+        if preview_size not in (None, "large", "small"):
+            logger.error(
+                "Invalid value for `preview_size`. Expected `large`, `small` or `None`, got `%s`",
+                preview_size,
+            )
+            return False
+
+        if not isinstance(preview_above, bool):
+            logger.error(
+                "Invalid type for `preview_above`. Expected `bool`, got `%s`",
+                type(preview_above),
+            )
+            return False
+
+        if not isinstance(invert_media, bool):
+            logger.error(
+                "Invalid type for `invert_media`. Expected `bool`, got `%s`",
+                type(invert_media),
+            )
+            return False
+
         if location and (
             not isinstance(location, (list, tuple))
             or len(location) != 2
@@ -335,6 +378,14 @@ class Form(InlineUnit):
             **({"location": location} if location else {}),
             **({"audio": audio} if audio else {}),
             **({"rich_message": rich_message} if rich_message is not None else {}),
+            **(
+                {"link_preview": link_preview}
+                if link_preview not in (None, False)
+                else {}
+            ),
+            **({"preview_size": preview_size} if preview_size else {}),
+            **({"preview_above": True} if preview_above else {}),
+            **({"invert_media": True} if invert_media else {}),
             **({"file": file, "mime_type": mime_type} if file else {}),
             **({"perms_map": perms_map} if perms_map else {}),
             **({"message": message} if isinstance(message, Message) else {}),
@@ -476,6 +527,12 @@ class Form(InlineUnit):
 
         form = self._units[inline_query.query]
         form_text = "🪐" if form.get("premium_emoji_pre_edit") else form.get("text")
+        invert_caption = bool(form.get("invert_media"))
+
+        async def answer_result(result, *, invert: bool = False):
+            apply_invert_media(result, invert)
+            await inline_query.answer([result], cache_time=0)
+
         try:
             match True:
                 case _ if "rich_message" in form:
@@ -494,73 +551,65 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
                 case _ if "photo" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.photo(
-                                form["photo"],
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
+                    await answer_result(
+                        await inline_query.builder.photo(
+                            form["photo"],
+                            id=utils.rand(20),
+                            text=form_text,
+                            parse_mode="HTML",
+                            buttons=self.generate_markup(
+                                form["uid"],
+                            ),
+                        ),
+                        invert=invert_caption,
                     )
                 case _ if "gif" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.document(
-                                form["gif"],
-                                title="Heroku",
-                                type="gif",
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
+                    await answer_result(
+                        await inline_query.builder.document(
+                            form["gif"],
+                            title="Heroku",
+                            type="gif",
+                            id=utils.rand(20),
+                            text=form_text,
+                            parse_mode="HTML",
+                            buttons=self.generate_markup(
+                                form["uid"],
+                            ),
+                        ),
+                        invert=invert_caption,
                     )
                 case _ if "video" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.document(
-                                form["video"],
-                                title="Heroku",
-                                description="Heroku",
-                                type="video",
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                mime_type="video/mp4",
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
+                    await answer_result(
+                        await inline_query.builder.document(
+                            form["video"],
+                            title="Heroku",
+                            description="Heroku",
+                            type="video",
+                            id=utils.rand(20),
+                            text=form_text,
+                            parse_mode="HTML",
+                            mime_type="video/mp4",
+                            buttons=self.generate_markup(
+                                form["uid"],
+                            ),
+                        ),
+                        invert=invert_caption,
                     )
                 case _ if "file" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.document(
-                                form["file"],
-                                title="Heroku",
-                                description="Heroku",
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                mime_type=form["mime_type"],
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
+                    await answer_result(
+                        await inline_query.builder.document(
+                            form["file"],
+                            title="Heroku",
+                            description="Heroku",
+                            id=utils.rand(20),
+                            text=form_text,
+                            parse_mode="HTML",
+                            mime_type=form["mime_type"],
+                            buttons=self.generate_markup(
+                                form["uid"],
+                            ),
+                        ),
+                        invert=invert_caption,
                     )
                 case _ if "location" in form:
                     await inline_query.answer(
@@ -581,37 +630,79 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
                 case _ if "audio" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.document(
-                                form["audio"]["url"],
-                                title=form["audio"].get("title", "Heroku"),
-                                type="audio",
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
+                    await answer_result(
+                        await inline_query.builder.document(
+                            form["audio"]["url"],
+                            title=form["audio"].get("title", "Heroku"),
+                            type="audio",
+                            id=utils.rand(20),
+                            text=form_text,
+                            parse_mode="HTML",
+                            buttons=self.generate_markup(
+                                form["uid"],
+                            ),
+                        ),
+                        invert=invert_caption,
                     )
                 case _:
-                    await inline_query.answer(
-                        [
+                    preview = self._form_link_preview(form)
+                    buttons = self.generate_markup(inline_query.query)
+                    above = bool(preview.get("above") or invert_caption)
+                    if preview["mode"] == "webpage":
+                        await answer_result(
+                            await inline_query.webpage_article(
+                                title="Heroku",
+                                text=form_text,
+                                url=preview["url"],
+                                preview_size=preview.get("size"),
+                                preview_above=above,
+                                buttons=buttons,
+                                id=utils.rand(20),
+                            )
+                        )
+                    else:
+                        await answer_result(
                             await inline_query.builder.article(
                                 title="Heroku",
                                 text=form_text,
                                 parse_mode="HTML",
-                                link_preview=False,
-                                buttons=self.generate_markup(inline_query.query),
+                                link_preview=bool(preview.get("show")),
+                                buttons=buttons,
                                 id=utils.rand(20),
-                            )
-                        ],
-                        cache_time=0,
-                    )
+                            ),
+                            invert=above,
+                        )
         except Exception as e:
             if form["uid"] in self._error_events:
                 self._error_events[form["uid"]].set()
                 self._error_events[form["uid"]] = e
+
+    def _form_link_preview(self: "InlineManager", form: dict) -> dict:
+        """Choose a plain article or an explicit webpage for a text form.
+
+        ``None`` and ``False`` keep the historical ``link_preview=False`` article.
+        """
+        link_preview = form.get("link_preview", None)
+        preview_size = form.get("preview_size")
+        preview_above = bool(form.get("preview_above"))
+        if preview_size not in (None, "large", "small"):
+            preview_size = None
+
+        if link_preview in (None, False) and not preview_size and not preview_above:
+            return {"mode": "article", "show": False, "above": False}
+
+        url = link_preview if isinstance(link_preview, str) else None
+        if url is None and (preview_size or preview_above):
+            found = utils.extract_urls(form.get("text") or "")
+            url = found[0] if found else None
+
+        if url:
+            return {
+                "mode": "webpage",
+                "url": url,
+                "size": preview_size,
+                "above": preview_above,
+                "show": True,
+            }
+
+        return {"mode": "article", "show": True, "above": preview_above}

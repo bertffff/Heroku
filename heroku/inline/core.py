@@ -42,15 +42,23 @@ from herokutl.tl.types import (
     InputPeerUser,
     Message,
     SendMessageTypingAction,
+    UpdateBotBusinessConnect,
     UpdateBotChatBoost,
     UpdateBotChatInviteRequester,
+    UpdateBotDeleteBusinessMessage,
+    UpdateBotEditBusinessMessage,
     UpdateBotGuestChatQuery,
     UpdateBotInlineSend,
     UpdateBotMessageReaction,
     UpdateBotMessageReactions,
+    UpdateBotNewBusinessMessage,
     UpdateBotPrecheckoutQuery,
+    UpdateBotPurchasedPaidMedia,
     UpdateBotShippingQuery,
+    UpdateBotStarsSubscription,
+    UpdateBotStopped,
     UpdateChannelParticipant,
+    UpdateEphemeralBotCallbackQuery,
     UpdateChatParticipant,
     UpdateMessagePoll,
     UpdateMessagePollVote,
@@ -119,6 +127,15 @@ BotUpdateType = typing.Literal[
     "chat_boost",
     "removed_chat_boost",
     "guest_message",
+    "business_connection",
+    "business_message",
+    "edited_business_message",
+    "deleted_business_messages",
+    "purchased_paid_media",
+    "bot_stopped",
+    "my_chat_member_private",
+    "subscription",
+    "ephemeral_callback_query",
 ]
 
 _BOT_UPDATE_EVENTS: dict[BotUpdateType, typing.Callable[[], object]] = {
@@ -147,6 +164,21 @@ _BOT_UPDATE_EVENTS: dict[BotUpdateType, typing.Callable[[], object]] = {
     "chat_boost": lambda: events.Raw(types=UpdateBotChatBoost),
     "removed_chat_boost": lambda: events.Raw(types=UpdateBotChatBoost),
     "guest_message": lambda: events.Raw(types=UpdateBotGuestChatQuery),
+    # Additive Bot API 7.2–10.3 updates that exist on TL layer 230.
+    # Names follow the Bot API Update object where there is a match.
+    "business_connection": lambda: events.Raw(types=UpdateBotBusinessConnect),
+    "business_message": lambda: events.Raw(types=UpdateBotNewBusinessMessage),
+    "edited_business_message": lambda: events.Raw(types=UpdateBotEditBusinessMessage),
+    "deleted_business_messages": lambda: events.Raw(
+        types=UpdateBotDeleteBusinessMessage
+    ),
+    "purchased_paid_media": lambda: events.Raw(types=UpdateBotPurchasedPaidMedia),
+    "bot_stopped": lambda: events.Raw(types=UpdateBotStopped),
+    "my_chat_member_private": lambda: events.Raw(types=UpdateBotStopped),
+    "subscription": lambda: events.Raw(types=UpdateBotStarsSubscription),
+    "ephemeral_callback_query": lambda: events.Raw(
+        types=UpdateEphemeralBotCallbackQuery
+    ),
 }
 
 

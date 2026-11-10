@@ -1,4 +1,19 @@
 # Heroku Changelog
+## Unreleased
+
+ - add opt-in Bot API / MTProto features to the inline bot (herokutl 2.2.1, layer 230), all backward compatible
+ - fix button `style` and `emoji_id` being dropped on `web_app` and `copy` buttons
+ - add `"disabled": True` buttons, and optional disabled current page in `build_pagination` (`disabled_current` or database key `heroku.inline` / `disabled_current_page`)
+ - add `call.answer_ephemeral()` and `{"action": "answer", "ephemeral": True}`; unsupported servers fall back to an alert
+ - fix `send_rich_ephemeral` so `receiver_id` is an input user
+ - add `bot.send_message_draft()` and `inline.stream()` for private-chat draft streaming
+ - add `link_preview`, `preview_size` and `preview_above` on forms and inline edits
+ - add `invert_media` on forms and galleries
+ - add `protect_content` and `message_effect_id` on direct bot sends (`TelethonBot.send_*`, `BotMessage.answer`). Inline forms sent with `sendInlineBotResult` cannot carry them
+ - register business, paid media, stars subscription, bot stopped and ephemeral button-press updates on `register_bot_update_handler`
+ - add `rich=True` for `list()` and `utils.expandable()`
+ - see `docs/INLINE_API.md`
+
 ## 🪐 Heroku 2.2.0
 
  - add rich messages support (rich = True) with the {img} placeholder
