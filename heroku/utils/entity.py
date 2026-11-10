@@ -268,6 +268,18 @@ def folder_includes_user(folder, user_id: int) -> bool:
     )
 
 
+def attach_bot_to_folder(folder, bot_peer):
+    """Add the inline bot to an existing dialog folder.
+
+    The same filter object is returned. Building a new ``DialogFilter``
+    drops required fields such as ``title`` and raises ``TypeError``.
+    """
+    peers = list(getattr(folder, "include_peers", None) or [])
+    peers.append(bot_peer)
+    folder.include_peers = peers
+    return folder
+
+
 def _folder_label(folder) -> str:
     title = getattr(folder, "title", None)
     text = getattr(title, "text", title)

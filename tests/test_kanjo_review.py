@@ -26,6 +26,7 @@ from types import SimpleNamespace
 from heroku.brand import asset_topic_id, preferred_asset_channel
 from heroku.utils.entity import (
     _matching_dialog_folder,
+    attach_bot_to_folder,
     folder_includes_user,
     get_topic_id,
 )
@@ -89,6 +90,45 @@ class FolderPeersTest(unittest.TestCase):
         chosen = _matching_dialog_folder([kanjo, heroku], "kanjo")
         self.assertIs(chosen, heroku)
         self.assertIs(_matching_dialog_folder([kanjo], "heroku"), kanjo)
+
+    def test_updating_a_folder_keeps_the_existing_title(self):
+        class DialogFilter:
+            def __init__(self, id, title, *args, **kwargs):
+                if title is None:
+                    raise TypeError(
+                        "DialogFilter.__init__() missing 1 required "
+                        "positional argument: 'title'"
+                    )
+                self.id = id
+                self.title = title
+                self.include_peers = list(kwargs.get("include_peers") or [])
+                self.pinned_peers = list(kwargs.get("pinned_peers") or [])
+                self.emoticon = kwargs.get("emoticon")
+                self.color = kwargs.get("color")
+
+        title = SimpleNamespace(text="Kanjo", entities=[])
+        folder = DialogFilter(
+            4,
+            title,
+            include_peers=[],
+            pinned_peers=["kept-pin"],
+            emoticon="🎴",
+            color=1,
+        )
+        from herokutl.tl.types import InputPeerUser
+
+        bot = InputPeerUser(user_id=9, access_hash=0)
+        updated = attach_bot_to_folder(folder, bot)
+
+        self.assertIs(updated, folder)
+        self.assertIs(updated.title, title)
+        self.assertEqual(updated.title.text, "Kanjo")
+        self.assertEqual(updated.pinned_peers, ["kept-pin"])
+        self.assertEqual(updated.emoticon, "🎴")
+        self.assertEqual(updated.include_peers, [bot])
+        with self.assertRaises(TypeError) as caught:
+            DialogFilter(4)
+        self.assertIn("title", str(caught.exception))
 
 
 class BannerFallbackTest(unittest.IsolatedAsyncioTestCase):

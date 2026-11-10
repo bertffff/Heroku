@@ -44,7 +44,6 @@ from herokutl.tl.functions.messages import (
     UpdateDialogFilterRequest,
 )
 from herokutl.tl.types import (
-    DialogFilter,
     Message,
     SendMessageTypingAction,
     UpdateBotBusinessConnect,
@@ -71,7 +70,7 @@ from herokutl.tl.types import (
 from herokutl.utils import get_display_name
 
 from .. import main, utils
-from ..utils.entity import folder_includes_user
+from ..utils.entity import attach_bot_to_folder, folder_includes_user
 from ..types import InlineDownError
 from ..database import Database
 from ..network import client_transport
@@ -433,23 +432,12 @@ class InlineManager(
                     if folder_includes_user(folder, self.bot_id):
                         break
 
-                    pinned = [await self._client.get_input_entity(self.bot_id)]
-                    include = folder.include_peers
-                    exclude = folder.exclude_peers
-                    emoticon = folder.emoticon
-                    color = folder.color
-
+                    bot_peer = await self._client.get_input_entity(self.bot_id)
+                    attach_bot_to_folder(folder, bot_peer)
                     await self._client(
                         UpdateDialogFilterRequest(
                             folder.id,
-                            DialogFilter(
-                                folder.id,
-                                pinned_peers=pinned,
-                                include_peers=include,
-                                exclude_peers=exclude,
-                                emoticon=emoticon,
-                                color=color,
-                            ),
+                            folder,
                         )
                     )
                     break
