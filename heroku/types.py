@@ -10,6 +10,11 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import ast
 import asyncio
@@ -40,7 +45,7 @@ from herokutl.tl.types import (
     UserFull,
 )
 
-from . import version
+from . import brand, version
 from ._internal import fetch_text, register_secret, tag_client_id
 from ._reference_finder import replace_all_refs
 from .inline.types import (
@@ -361,7 +366,7 @@ class Module:
                 "✖️ <b>Declined joining <a"
                 f' href="https://t.me/{channel.username}">{utils.escape_html(channel.title)}</a></b>'
             ),
-            photo="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/declined_jr.jpg",
+            photo=brand.ASSET_BANNER,
         )
 
     async def request_join(
@@ -425,7 +430,7 @@ class Module:
 
         await self.inline.bot.send_photo(
             self.tg_id,
-            "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/join_request.jpg",
+            brand.ASSET_BANNER,
             caption=(
                 self._client.loader.lookup("translations")
                 .strings("requested_join")
@@ -518,7 +523,7 @@ class Module:
             if version.__version__ < ver:
                 _raise(
                     RuntimeError(
-                        f"Library requires Heroku version {'{}.{}.{}'.format(*ver)}+"
+                        f"Library requires Heroku-compatible version {'{}.{}.{}'.format(*ver)}+ "
                     )
                 )
 

@@ -10,13 +10,20 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import re
 import string
 import random
 
 from herokutl.tl.types import Message
 
-from .. import loader, utils
+from .. import brand, loader, utils
 from ..inline.types import BotInlineMessage, InlineCall
 
 
@@ -54,7 +61,7 @@ class InlineStuff(loader.Module):
 
         await message.delete()
 
-        m = await message.respond("🪐", reply_to=utils.get_topic(message))
+        m = await message.respond(brand.EMOJI, reply_to=utils.get_topic(message))
 
         await self.inline.gallery(
             message=m,
@@ -126,29 +133,19 @@ class InlineStuff(loader.Module):
         match message.text:
             case "/start":
                 await message.answer_photo(
-                    "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/start_cmd.jpg",
+                    brand.ASSET_BANNER,
                     caption=self.strings["this_is_heroku"].format(
-                        (
-                            "<tg-emoji emoji-id=5463379725441341739>🪐</tg-emoji>"
-                            if self._client.heroku_me.premium is True
-                            else "🪐"
-                        ),
-                        utils.get_platform_emoji() if self._client.heroku_me.premium is True else "Heroku",
-                    ),
+                        brand.EMOJI,
+                        "Kanjo",
+                    )
+                    + "\n\n"
+                    + brand.ATTRIBUTION_HTML,
                     reply_markup=self.inline.generate_markup(
                         markup_obj=[
                             [
                                 {
                                     "text": "GitHub",
-                                    "url": "https://github.com/Heroku-userbot/Heroku",
-                                    "emoji_id": "5231065262228250587",
-                                }
-                            ],
-                            [
-                                {
-                                    "text": self.strings["support_chat_caption"],
-                                    "url": "https://t.me/heroku_talks",
-                                    "emoji_id": "5363805650327450240",
+                                    "url": brand.REPO_URL,
                                 }
                             ],
                         ]
@@ -159,7 +156,7 @@ class InlineStuff(loader.Module):
                     pass
                 else:
                     await message.answer_photo(
-                        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/start_cmd.jpg",
+                        brand.ASSET_BANNER,
                         caption=self.strings["profile_cmd"].format(
                             prefix=self.get_prefix(),
                             ram_usage=utils.get_ram_usage(),

@@ -1,5 +1,8 @@
+# Legacy unit for an install that already lives under /opt/heroku
+# and runs as the heroku user. New installs should use kanjo.service.
+# `python -m heroku` and the HEROKU_* variables stay valid.
 [Unit]
-Description=Heroku userbot
+Description=Kanjo userbot (legacy heroku.service paths)
 After=network-online.target
 Wants=network-online.target
 

@@ -139,7 +139,7 @@ if (
     and all(trigger not in os.environ for trigger in {"DOCKER", "NO_SUDO"})
 ):
     print("\U0001f6ab" * 15)
-    print("You attempted to run Heroku on behalf of root user")
+    print("You attempted to run Kanjo on behalf of root user")
     print("Please, create a new user and restart script")
     print("If this action was intentional, pass --root argument instead")
     print("\U0001f6ab" * 15)

@@ -1,4 +1,18 @@
-# Heroku Changelog
+# Kanjo Changelog
+
+## Kanjo 1.0.0 — rebrand
+
+The user-facing name of this tree is Kanjo. It is based on Heroku Userbot 2.2.0, itself a fork of Hikka. The license stays AGPL-3.0.
+
+- Banners, `.info` / `.help` / `.ping` / `.update`, the inline bot greeting, Docker and the docs say Kanjo.
+- Display version is `Kanjo 1.0.0`. `heroku.version.__version__` stays `(2, 2, 0)` so `# scope: heroku_min` still compares against the Heroku 2.2.0 baseline.
+- The Python package is still `heroku`. `python -m heroku` and `import heroku` work. `python -m kanjo` and `import kanjo` are aliases. `import hikka` still resolves to `heroku`.
+- `KANJO_*` environment variables are accepted when the matching `HEROKU_*` variable is unset or blank. A non-empty `HEROKU_*` wins.
+- Database keys (`heroku.main`, `heroku.inline`, module class names), session file names, `config-<id>.json` and `.modules_cache` are unchanged.
+- Updates come from https://github.com/bertffff/Heroku. That URL lives in `heroku.brand.REPO_URL`.
+- New inline bots are named `kanjo_<6 chars>_bot`. Bots that already exist are left as they are.
+- Upstream support chats and donation links are gone from the UI. Attribution to Heroku and Hikka stays.
+
 ## Unreleased
 
  - add opt-in Bot API / MTProto features to the inline bot (herokutl 2.2.1, layer 230), all backward compatible

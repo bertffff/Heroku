@@ -55,7 +55,7 @@ from herokutl.tl.functions.account import GetPasswordRequest
 from herokutl.tl.functions.auth import CheckPasswordRequest
 from herokutl.tl.functions.contacts import UnblockRequest
 
-from . import database, loader, utils, version
+from . import brand, database, loader, version
 from ._internal import (
     client_id_ctx,
     client_id_override,
@@ -80,7 +80,6 @@ from .qr import QRCode
 from .secure import patcher
 from .tl_cache import CustomTelegramClient
 from .translations import Translator
-from .version import __version__
 
 
 BASE_DIR = (
@@ -263,7 +262,13 @@ def parse_arguments() -> dict:
     Parses the arguments
     :returns: Dictionary with arguments
     """
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        prog="kanjo",
+        description=(
+            "Kanjo userbot. Start it with `python -m kanjo` or `python -m heroku`. "
+            + brand.ATTRIBUTION
+        ),
+    )
     parser.add_argument("--phone", "-p", action="append")
     parser.add_argument(
         "--qr-login",
@@ -320,12 +325,13 @@ def parse_arguments() -> dict:
         default=cli_transport_default(),
         type=str.lower,
         help=(
-            "MTProto transport. auto (default, or HEROKU_TRANSPORT): "
+            "MTProto transport. auto (default, or HEROKU_TRANSPORT / KANJO_TRANSPORT): "
             "obfuscated WebSocket when SAND_EGRESS_TUNNEL_PROXY_ADDR is set "
             "or http://127.0.0.1:8791 accepts connections, otherwise TCP full. "
             "ws: always wss://<dc>.web.telegram.org/apiws (HTTP CONNECT when "
             "that egress proxy is present, direct WSS otherwise). "
             "tcp: always ConnectionTcpFull. "
+            "A non-empty HEROKU_TRANSPORT wins over KANJO_TRANSPORT. "
             "Ignored when --proxy-host/--proxy-port/--proxy-secret is set."
         ),
     )
@@ -470,7 +476,7 @@ class Heroku:
 
         if explicit_proxy and transport == "ws":
             logging.warning(
-                "Proxy flags are set, so Heroku is using the %s proxy from --proxy-host",
+                "Proxy flags are set, so Kanjo is using the %s proxy from --proxy-host",
                 proxy_type,
             )
 
@@ -640,7 +646,7 @@ class Heroku:
             and not existing
         ):
             while bot := input(
-                "You can enter a custom bot username or leave it empty and Heroku will generate a random one: "
+                "You can enter a custom bot username or leave it empty and Kanjo will create @kanjo_xxxxxx_bot: "
             ):
                 bot = bot.strip()
                 bot = bot.lstrip("@")
@@ -687,7 +693,7 @@ class Heroku:
         await db.init()
 
         while bot := input(
-            "You can enter a custom bot username or leave it empty and Heroku will generate a random one: "
+            "You can enter a custom bot username or leave it empty and Kanjo will create @kanjo_xxxxxx_bot: "
         ):
             try:
                 if await self._check_bot(client, bot):
@@ -754,7 +760,7 @@ class Heroku:
             connection_retries=None,
             device_model=get_app_name(),
             system_version=generate_random_system_version(),
-            app_version=".".join(map(str, __version__)) + " x64",
+            app_version=brand.app_version(),
             lang_code="en",
             system_lang_code="en-US",
         )
@@ -878,7 +884,7 @@ class Heroku:
                     connection_retries=None,
                     device_model=get_app_name(),
                     system_version=generate_random_system_version(),
-                    app_version=".".join(map(str, __version__)) + " x64",
+                    app_version=brand.app_version(),
                     lang_code="en",
                     system_lang_code="en-US",
                 )
@@ -970,7 +976,7 @@ class Heroku:
     async def _badge(self, client: CustomTelegramClient):
         """Call the badge in shell"""
         try:
-            if os.environ.get("HEROKU_NO_GIT") == "1":
+            if brand.env_flag("NO_GIT"):
                 build = "unknown"
                 upd = "Git disabled"
             else:
@@ -983,23 +989,23 @@ class Heroku:
             pref = client.heroku_db.get("heroku.main", "command_prefix", None)
 
             logo = (
-                "                          _           \n"
-                r"  /\  /\ ___  _ __  ___  | | __ _   _ "
-                "\n"
-                r" / /_/ // _ \| '__|/ _ \ | |/ /| | | |"
-                "\n"
-                "/ __  /|  __/| |  | (_) ||   < | |_| |\n"
-                r"\/ /_/  \___||_|   \___/ |_|\_\ \__,_|"
-                "\n\n"
+                "  _  __             _       \n"
+                " | |/ /__ _ _ __   (_) ___  \n"
+                " | ' // _` | '_ \\  | |/ _ \\ \n"
+                " | . \\ (_| | | | | | | (_) |\n"
+                " |_|\\_\\__,_|_| |_| |_|\\___/ \n"
+                "            userbot\n\n"
+                f"• {brand.display_version()}\n"
+                f"• based on {brand.UPSTREAM_LABEL}\n"
                 f"• Build: {build[:7]}\n"
-                f"• Version: {'.'.join(list(map(str, list(__version__))))}\n"
                 f"• {upd}\n"
+                f"• {brand.ATTRIBUTION}\n"
             )
             if not self.omit_log:
                 print(logo)
                 logging.debug(
-                    "\n🪐 Heroku %s #%s (%s) started",
-                    ".".join(list(map(str, list(__version__)))),
+                    "\n%s #%s (%s) started",
+                    brand.display_version(),
                     build[:7],
                     upd,
                 )
@@ -1017,22 +1023,22 @@ class Heroku:
 
                 await client.heroku_inline.bot.send_photo(
                     log_chat_id,
-                    "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_started.jpg",
+                    brand.ASSET_BANNER,
                     caption=(
-                        "{} <b>{} started!</b>\n\n<tg-emoji emoji-id=5231065262228250587>⚙</tg-emoji> <b>GitHub commit SHA: <a"
-                        ' href="https://github.com/Heroku-userbot/Heroku/commit/{}">{}</a></b>\n<tg-emoji emoji-id=5873225338984599714>🔎</tg-emoji>'
-                        " <b>Update status: {}</b>\n<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> <b>Prefix:</b> <code>{}</code>"
+                        "{} <b>{} started!</b>\n<i>{}</i>\n\n"
+                        "<b>GitHub commit SHA: <a"
+                        ' href="{}/commit/{}">{}</a></b>\n'
+                        " <b>Update status: {}</b>\n <b>Prefix:</b> <code>{}</code>\n\n{}"
                     ).format(
-                        (
-                            utils.get_platform_emoji()
-                            if client.heroku_me.premium is True
-                            else "🪐 Heroku"
-                        ),
-                        ".".join(list(map(str, list(__version__)))),
+                        brand.EMOJI,
+                        brand.display_version(),
+                        brand.UPSTREAM_LABEL,
+                        brand.REPO_URL,
                         build,
                         build[:7],
                         upd,
                         "." if pref is None else pref,
+                        brand.ATTRIBUTION_HTML,
                     ),
                     message_thread_id=message_thread_id,
                 )

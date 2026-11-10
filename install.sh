@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="Heroku"
+# REPO_URL default matches heroku/brand.py. A set HEROKU_* value wins over KANJO_*.
+APP_NAME="Kanjo"
+LEGACY_DIR="Heroku"
 MODULE_NAME="heroku"
-REPO_URL="${HEROKU_REPO_URL:-https://github.com/bertffff/Heroku.git}"
-VENV_DIR="${HEROKU_VENV_DIR:-.venv}"
-LOG_FILE="$PWD/heroku-install.log"
+REPO_URL="${HEROKU_REPO_URL:-${KANJO_REPO_URL:-https://github.com/bertffff/Heroku.git}}"
+VENV_DIR="${HEROKU_VENV_DIR:-${KANJO_VENV_DIR:-.venv}}"
+LOG_FILE="$PWD/kanjo-install.log"
 
 if [ "${SUDO_USER:-}" != "" ] && command -v sudo >/dev/null 2>&1; then
 	RUN_AS_USER=(sudo -u "$SUDO_USER")
@@ -35,7 +37,7 @@ find_root() {
 find_installed() {
 	local dir
 
-	for dir in "$PWD" "$PWD/$APP_NAME" "$HOME/$APP_NAME"; do
+	for dir in "$PWD" "$PWD/$APP_NAME" "$HOME/$APP_NAME" "$PWD/$LEGACY_DIR" "$HOME/$LEGACY_DIR"; do
 		if is_installed "$dir"; then
 			printf "%s" "$dir"
 			return 0
@@ -45,7 +47,7 @@ find_installed() {
 }
 
 is_minimal() {
-	case "${HEROKU_MINIMAL:-auto}" in
+	case "${HEROKU_MINIMAL:-${KANJO_MINIMAL:-auto}}" in
 		1) return 0 ;;
 		0) return 1 ;;
 	esac
@@ -170,7 +172,7 @@ git_as_user() {
 }
 
 switch_branch() {
-	local branch="${HEROKU_BRANCH:-}" current output
+	local branch="${HEROKU_BRANCH:-${KANJO_BRANCH:-}}" current output
 
 	if [ -z "$branch" ]; then
 		return 0
@@ -212,8 +214,8 @@ prepare_repo() {
 	fi
 
 	local branch=()
-	if [ -n "${HEROKU_BRANCH:-}" ]; then
-		branch=(--branch "$HEROKU_BRANCH")
+	if [ -n "${HEROKU_BRANCH:-${KANJO_BRANCH:-}}" ]; then
+		branch=(--branch "${HEROKU_BRANCH:-$KANJO_BRANCH}")
 	fi
 
 	info "Cloning repo..."
@@ -250,7 +252,11 @@ start_app() {
 		exec </dev/tty
 	fi
 
-	exec ${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$VENV_DIR/bin/python" -m "$MODULE_NAME" "$@"
+	local entry="heroku"
+	if "$VENV_DIR/bin/python" -c "import kanjo" >/dev/null 2>&1; then
+		entry="kanjo"
+	fi
+	exec ${RUN_AS_USER[@]+"${RUN_AS_USER[@]}"} "$VENV_DIR/bin/python" -m "$entry" "$@"
 }
 
 main() {
@@ -258,9 +264,9 @@ main() {
 		cd "$root"
 	fi
 
-	if [ "${HEROKU_FORCE_INSTALL:-0}" != "1" ] && existing="$(find_installed)"; then
+	if [ "${HEROKU_FORCE_INSTALL:-${KANJO_FORCE_INSTALL:-0}}" != "1" ] && existing="$(find_installed)"; then
 		cd "$existing"
-		info "Heroku is already installed, starting..."
+		info "Kanjo is already installed, starting..."
 		switch_branch
 		start_app "$@"
 		return

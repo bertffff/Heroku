@@ -12,10 +12,14 @@ from .customtl import ConnectionTcpFull, MTProtoState
 
 
 def patch(client: CustomTelegramClient, session: SQLiteSession):
-    if os.environ.get("HEROKU_ALLOW_INSECURE_PROXY") != "1":
+    from ..brand import env_flag
+
+    if not env_flag("ALLOW_INSECURE_PROXY"):
         raise RuntimeError(
             "Unencrypted session proxy is disabled. Use a normal Telegram session "
-            "or explicitly set HEROKU_ALLOW_INSECURE_PROXY=1 for a trusted local proxy."
+            "or explicitly set HEROKU_ALLOW_INSECURE_PROXY=1 "
+            "(KANJO_ALLOW_INSECURE_PROXY=1 is the same switch) "
+            "for a trusted local proxy."
         )
     session_id = re.findall(r"\d+", session.filename)[-1]
     socket_path = (

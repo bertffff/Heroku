@@ -10,12 +10,19 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import contextlib
 import getpass
 import herokutl
 from herokutl.tl.types import Message, User
 
-from .. import loader, main, utils, version
+from .. import brand, loader, main, utils, version
 from ..inline.types import InlineCall
 
 
@@ -64,7 +71,6 @@ class CoreMod(loader.Module):
                     "vds",
                     "wsl",
                     "userland",
-                    "hikkahost",
                     "universal",
                 ]
             ],
@@ -97,10 +103,10 @@ class CoreMod(loader.Module):
         return f"{str(chatid)}.{module}" if module else chatid
 
     @loader.command(
-        ru_doc="Информация о Хероку",
-        en_doc="Information of Heroku",
-        ua_doc="Інформація про Хероку",
-        de_doc="Informationen über Heroku",
+        ru_doc="Версия Kanjo, база Heroku и ссылка на репозиторий",
+        en_doc="Kanjo version, Heroku base and repository link",
+        ua_doc="Версія Kanjo, база Heroku і посилання на репозиторій",
+        de_doc="Kanjo-Version, Heroku-Basis und Repository-Link",
     )
     async def herokucmd(self, message: Message):
 
@@ -116,16 +122,23 @@ class CoreMod(loader.Module):
         else:
             branch_text = self.strings["unstable"].format(version.branch)
 
+        version_kwargs = {
+            "mark": brand.EMOJI,
+            "version": brand.display_version(),
+            "upstream": brand.UPSTREAM_LABEL,
+            "build": utils.get_commit_url(),
+            "htl": f"{herokutl.__version__} #{herokutl.tl.alltlobjects.LAYER}",
+            "htl_version": herokutl.__version__,
+            "layer": herokutl.tl.alltlobjects.LAYER,
+            "current_user": getpass.getuser(),
+            "banner_url": brand.ASSET_BANNER,
+            "repo": brand.REPO_URL,
+            "repo_label": brand.REPO_SLUG,
+            "attribution": brand.ATTRIBUTION_HTML,
+            "platform": brand.EMOJI,
+        }
         if self.config["rich_mode"]:
-            rich_message = self.strings["rich_heroku_message"].format(
-                platform=utils.get_platform_emoji(),
-                version=".".join(map(str, version.__version__)),
-                build=utils.get_commit_url(),
-                htl_version=herokutl.__version__,
-                layer=herokutl.tl.alltlobjects.LAYER,
-                current_user=getpass.getuser(),
-                banner_url="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_cmd.jpg",
-            )
+            rich_message = self.strings["rich_heroku_message"].format(**version_kwargs)
             if branch_text:
                 rich_message += f"<footer>{branch_text.strip()}</footer>"
             await utils.answer(
@@ -137,18 +150,8 @@ class CoreMod(loader.Module):
 
         await utils.answer(
             message,
-            self.strings["heroku"].format(
-                (
-                    utils.get_platform_emoji()
-                    if self._client.heroku_me.premium
-                    else "🪐 <b>Heroku userbot</b>"
-                ),
-                *version.__version__,
-                utils.get_commit_url(),
-                f"{herokutl.__version__} #{herokutl.tl.alltlobjects.LAYER}",
-            )
-            + (branch_text),
-            file="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_cmd.jpg",
+            self.strings["heroku"].format(**version_kwargs) + (branch_text),
+            file=brand.ASSET_BANNER,
             reply_to=getattr(message, "reply_to_msg_id", None),
         )
 
@@ -706,13 +709,13 @@ class CoreMod(loader.Module):
                 self.strings["choose_installation"],
                 message,
                 reply_markup=self._markup(),
-                photo="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_installation.jpg",
+                photo=brand.ASSET_BANNER,
             )
         ):
 
             await self.client.send_file(
                 message.peer_id,
-                "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_installation.jpg",
+                brand.ASSET_BANNER,
                 caption=self.strings["vds_install"],
                 reply_to=getattr(message, "reply_to_msg_id", None),
             )

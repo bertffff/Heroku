@@ -10,6 +10,11 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import asyncio
 import contextlib
@@ -38,10 +43,11 @@ from herokutl.tl.types import (
 
 from .. import loader, utils, version
 from .._internal import restart
+from ..brand import REPO_URL, env_flag
 from ..inline.types import BotInlineCall, InlineCall
 
 logger = logging.getLogger(__name__)
-NO_GIT = os.environ.get("HEROKU_NO_GIT") == "1"
+NO_GIT = env_flag("NO_GIT")
 
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
 os.environ["GIT_ASKPASS"] = "echo"
@@ -49,7 +55,7 @@ os.environ["GIT_ASKPASS"] = "echo"
 
 @loader.tds
 class UpdaterMod(loader.Module):
-    """Updates itself, tracks latest Heroku releases, and notifies you, if update is required"""
+    """Updates Kanjo from this repository and tells you when an update is waiting"""
 
     strings = {
         "name": "Updater",
@@ -64,7 +70,7 @@ class UpdaterMod(loader.Module):
             "Используйте <code>.update</code>, чтобы забрать коммиты вручную."
         ),
     }
-    FORK_ORIGIN = "https://github.com/bertffff/Heroku"
+    FORK_ORIGIN = REPO_URL
     _GIT_FETCH_INTERVAL = 300
     _EMFILE_FETCH_BACKOFF = 900
 
@@ -76,7 +82,7 @@ class UpdaterMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "GIT_ORIGIN_URL",
-                "https://github.com/bertffff/Heroku",
+                REPO_URL,
                 lambda: self.strings["origin_cfg_doc"],
                 validator=loader.validators.Link(),
             ),
@@ -382,7 +388,7 @@ class UpdaterMod(loader.Module):
             self.strings["restarting_caption"].format(
                 utils.get_platform_emoji()
                 if self._client.heroku_me.premium
-                else "Heroku"
+                else "Kanjo"
             ),
         )
 
@@ -622,7 +628,7 @@ class UpdaterMod(loader.Module):
                 if title:
                     raw_title = getattr(title, "text", title)
 
-                    if str(raw_title).strip() == "Heroku":
+                    if str(raw_title).strip() in {"Heroku", "Kanjo"}:
                         heroku_f = True
 
         if heroku_f is True:
@@ -634,7 +640,7 @@ class UpdaterMod(loader.Module):
                         folder_id,
                         DialogFilter(
                             folder_id,
-                            title=TextWithEntities(text="Heroku", entities=[]),
+                            title=TextWithEntities(text="Kanjo", entities=[]),
                             pinned_peers=(
                                 [
                                     await self._client.get_input_entity(
@@ -650,22 +656,20 @@ class UpdaterMod(loader.Module):
                                     None,
                                     ignore_migrated=True,
                                 )
-                                if "heroku" in dialog.name
-                                or "Heroku" in dialog.name
-                                and dialog.is_channel
+                                if (
+                                    dialog.is_channel
+                                    and (
+                                        "kanjo" in dialog.name.lower()
+                                        or "heroku" in dialog.name.lower()
+                                    )
+                                )
                                 or (
                                     self._client.loader.inline.init_complete
                                     and dialog.entity.id
                                     == self._client.loader.inline.bot_id
                                 )
-                                or dialog.entity.id
-                                in [
-                                    2445389036,
-                                    2341345589,
-                                    2410964167,
-                                ]  # official heroku chats
                             ],
-                            emoticon="🐱",
+                            emoticon="🎴",
                             exclude_peers=[],
                             contacts=False,
                             non_contacts=False,
@@ -680,7 +684,7 @@ class UpdaterMod(loader.Module):
                 )
             except Exception:
                 logger.critical(
-                    "Can't create Heroku folder. Possible reasons are:\n"
+                    "Can't create the Kanjo folder. Possible reasons are:\n"
                     "- User reached the limit of folders in Telegram\n"
                     "- User got floodwait\n"
                     "Ignoring error and adding folder addition to ignore list\n",
@@ -812,7 +816,7 @@ class UpdaterMod(loader.Module):
             text=self.strings["stop_ub_confirm"].format(
                 utils.get_platform_emoji()
                 if self.client.heroku_me.premium
-                else "Heroku"
+                else "Kanjo"
             ),
             reply_markup=[
                 [

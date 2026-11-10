@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import logging
 
 from herokutl.tl.types import Message
@@ -35,7 +42,7 @@ ALL_INVOKES = [
 
 @loader.tds
 class HerokuSettingsMod(loader.Module):
-    """Advanced settings for Heroku Userbot"""
+    """Advanced settings for Kanjo"""
 
     strings = {"name": "HerokuSettings"}
 

@@ -40,7 +40,7 @@ from herokutl.errors.rpcerrorlist import MediaCaptionTooLongError
 from herokutl.tl.functions.channels import JoinChannelRequest
 from herokutl.tl.types import Channel, InputMediaWebPage
 
-from .. import loader, main, utils
+from .. import brand, loader, main, utils
 from .._internal import fetch_text, private_write
 from .._local_storage import RemoteStorage
 from ..inline.types import InlineCall
@@ -477,7 +477,7 @@ class LoaderMod(loader.Module):
     ) -> str:
         """Render batch results or a single module with description and commands."""
         header = (
-            '<tg-emoji emoji-id="5134452506935427991">🪐</tg-emoji> '
+            "🎴 "
             f"<b>{len(modules)} Modules loaded</b>"
         )
         parts = [] if single else [f"<p>{header}</p>" if rich else header]
@@ -552,7 +552,7 @@ class LoaderMod(loader.Module):
             lines = lines if command_lines is None else command_lines
             if single:
                 title = (
-                    '<tg-emoji emoji-id="5134452506935427991">🪐</tg-emoji> '
+                    "🎴 "
                     f"<b>{utils.escape_html(str(name))}</b>{version_suffix}"
                 )
                 parts.append(f"<p>{title}</p>" if rich else title)
@@ -719,7 +719,7 @@ class LoaderMod(loader.Module):
                 "💫 <b>Joined <a"
                 f' href="https://t.me/{channel.username}">{utils.escape_html(channel.title)}</a></b>'
             ),
-            photo="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/joined_jr.jpg",
+            photo=brand.ASSET_BANNER,
         )
 
     async def _confirm_install(self, message, kind: str, items: list) -> bool:
@@ -963,7 +963,7 @@ class LoaderMod(loader.Module):
             ver_ = tuple(map(int, ver.split(".")))
             if main.__version__ < ver_:
                 logger.error(
-                    "Module %s requires Heroku %s, current version is %s",
+                    "Module %s requires heroku_min %s, current compatibility version is %s",
                     module_label,
                     ver,
                     ".".join(map(str, main.__version__)),

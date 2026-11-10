@@ -4,6 +4,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 """Choose TCP or WebSocket MTProto when raw DC addresses are blocked."""
 
 from __future__ import annotations
@@ -46,16 +53,22 @@ def normalize_transport_name(value: str | None) -> str:
 
 
 def cli_transport_default(environ: Mapping[str, str] | None = None) -> str:
-    """Default for ``--transport``: ``HEROKU_TRANSPORT`` or ``auto``."""
-    env = os.environ if environ is None else environ
-    raw = env.get("HEROKU_TRANSPORT")
+    """Default for ``--transport``.
+
+    ``HEROKU_TRANSPORT`` wins when it is non-empty. Otherwise
+    ``KANJO_TRANSPORT`` is used. Missing or blank means ``auto``.
+    """
+    from ..brand import env_get_source
+
+    raw, source = env_get_source("TRANSPORT", environ)
     if raw is None or not str(raw).strip():
         return "auto"
 
     normalized = normalize_transport_name(str(raw))
     if normalized != str(raw).strip().lower():
         logger.warning(
-            "HEROKU_TRANSPORT=%r is not auto, tcp, or ws; using auto",
+            "%s=%r is not auto, tcp, or ws; using auto",
+            source,
             raw,
         )
     return normalized

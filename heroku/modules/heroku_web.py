@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import json
 import logging
@@ -36,7 +43,7 @@ from ..loader import LOADED_MODULES_PATH
 from .._internal import private_write, register_secret, restart
 from ..inline.types import InlineCall
 from ..tl_cache import CustomTelegramClient
-from ..version import __version__
+from ..brand import app_version
 
 logger = logging.getLogger(__name__)
 
@@ -117,21 +124,12 @@ class HerokuWebMod(loader.Module):
         return
 
     async def donate(self, call: InlineCall):
+        from ..brand import ATTRIBUTION_HTML, REPO_URL
+
         await call.edit(
-            self.strings["donate"],
+            ATTRIBUTION_HTML,
             reply_markup=[
-                [
-                    {"text": "CryptoBot", "url": "http://t.me/send?start=IVJdKAOn8ihG"}
-                ],
-                [
-                    {"text": "TON", "url": "ton://transfer/UQD_vekSRxbCmgBnYLhPFaeN5ilviOh8onpOXa8VDFmhZBLO?text=%D0%9C%D1%8F%D0%B2"}
-                ],
-                [
-                    {"text": "DALink", "url": "https://dalink.to/zetgo"}
-                ],
-                [
-                    {"text": self.strings["feedback_me"], "url": "https://t.me/ZetGo"}
-                ],
+                [{"text": "GitHub", "url": REPO_URL}],
             ],
         )
 
@@ -170,7 +168,7 @@ class HerokuWebMod(loader.Module):
             connection_retries=None,
             device_model=main.get_app_name(),
             system_version=main.generate_random_system_version(),
-            app_version=".".join(map(str, __version__)) + " x64",
+            app_version=app_version(),
             lang_code="en",
             system_lang_code="en-US",
         )

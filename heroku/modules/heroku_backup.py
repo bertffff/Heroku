@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import contextlib
 import datetime
@@ -25,7 +32,7 @@ from pathlib import Path
 
 from herokutl.tl.types import Message
 
-from .. import loader, utils
+from .. import brand, loader, utils
 from ..inline.types import BotInlineCall
 
 logger = logging.getLogger(__name__)
@@ -50,7 +57,7 @@ class HerokuBackupMod(loader.Module):
         if not self.get("period"):
             await self.inline.bot.send_photo(
                 self.tg_id,
-                photo="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/unit_alpha.jpg",
+                photo=brand.ASSET_BANNER,
                 caption=self.strings["period"],
                 reply_markup=self.inline.generate_markup(
                     utils.chunks(

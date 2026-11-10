@@ -340,7 +340,9 @@ def _collect_optional_names(value) -> set[str]:
 
 def enabled_optional_modules(db=None) -> set[str]:
     """Core modules that stay unloaded until the owner opts in."""
-    enabled = _collect_optional_names(os.environ.get("HEROKU_OPTIONAL_MODULES", ""))
+    from .brand import env_get
+
+    enabled = _collect_optional_names(env_get("OPTIONAL_MODULES", "") or "")
     try:
         enabled.update(_collect_optional_names(main.get_config_key("optional_modules")))
     except Exception:
@@ -363,8 +365,8 @@ def _filter_optional_core(mods: list[str], db) -> list[str]:
         name = os.path.basename(mod).rsplit(".", 1)[0]
         if name in OPTIONAL_CORE_MODULES and name not in enabled:
             logger.info(
-                "Skipping optional module %s. Enable it with optional_modules "
-                "or HEROKU_OPTIONAL_MODULES",
+                "Skipping optional module %s. Enable it with optional_modules, "
+                "HEROKU_OPTIONAL_MODULES, or KANJO_OPTIONAL_MODULES",
                 name,
             )
             continue

@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import logging
 
 from .. import loader, utils
@@ -95,12 +102,12 @@ class Quickstart(loader.Module):
             required_topics = [
                 (
                     "Assets",
-                    "🌆 Your Heroku assets will be stored here",
+                    "🌆 Your Kanjo assets will be stored here",
                     5877307202888273539,
                 ),
                 (
                     "Backups",
-                    "💾 Your Heroku backups will be stored here",
+                    "💾 Your Kanjo backups will be stored here",
                     5877307202888273539,
                 ),
             ]

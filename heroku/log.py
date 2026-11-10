@@ -370,7 +370,7 @@ class TelegramLogsHandler(logging.Handler):
     ):
         chunks = (
             item.message
-            + "\n\n<b>🪐 Full traceback:</b>\n"
+            + "\n\n<b>🎴 Full traceback:</b>\n"
             + f'<pre><code class="language-python">{item.full_stack}</code></pre>'
         )
 
@@ -457,7 +457,7 @@ class TelegramLogsHandler(logging.Handler):
                             reply_markup=self._mods[client_id].inline.generate_markup(
                                 [
                                     {
-                                        "text": "🪐 Full traceback",
+                                        "text": "🎴 Full traceback",
                                         "callback": self._show_full_trace,
                                         "args": (
                                             self._mods[client_id].inline.bot,
@@ -625,12 +625,12 @@ class TelegramLogsHandler(logging.Handler):
 
 
 _main_formatter = RedactingFormatter(
-    fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    fmt="%(asctime)s [kanjo] [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     style="%",
 )
 _tg_formatter = RedactingFormatter(
-    fmt="[%(levelname)s] %(name)s: %(message)s\n",
+    fmt="[kanjo] [%(levelname)s] %(name)s: %(message)s\n",
     datefmt=None,
     style="%",
 )

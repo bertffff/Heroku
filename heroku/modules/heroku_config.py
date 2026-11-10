@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import ast
 import contextlib
 import difflib
@@ -62,7 +69,7 @@ class _InlineFormDraft:
 
 @loader.tds
 class HerokuConfigMod(loader.Module):
-    """Interactive configurator for Heroku Userbot"""
+    """Interactive configurator for Kanjo"""
 
     strings = {"name": "HerokuConfig"}
 
@@ -70,7 +77,7 @@ class HerokuConfigMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "cfg_emoji",
-                "🪐",
+                "🎴",
                 lambda: self.strings["_cfg_emoji"],
                 validator=loader.validators.String(),
             ),

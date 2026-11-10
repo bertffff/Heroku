@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import re
 import string
 import sys
@@ -43,7 +50,7 @@ def api_config(tty: bool | None = None):
     if tty:
         print_banner("banner.txt")
 
-    tty_print("\033[0;95mWelcome to Heroku Userbot!\033[0m", tty)
+    tty_print("\033[0;95mWelcome to Kanjo!\033[0m", tty)
     tty_print("\033[0;96m1. Go to https://my.telegram.org and login\033[0m", tty)
     tty_print("\033[0;96m2. Click on \033[1;96mAPI development tools\033[0m", tty)
     tty_print(

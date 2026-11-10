@@ -156,6 +156,9 @@ config-*.json
 config.json
 *cache*.json
 *.png
+!assets/logo.png
+!assets/banner.png
+!assets/favicon.png
 *.webp
 *.webm
 *.tgs

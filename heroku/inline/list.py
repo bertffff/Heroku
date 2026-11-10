@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import contextlib
 import functools
@@ -202,7 +209,7 @@ class List(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.heroku_me.premium
-                        else "🪐"
+                        else "🎴"
                     )
                     + self.translator.getkey("inline.opening_list"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -370,7 +377,7 @@ class List(InlineUnit):
             ):
                 try:
                     page = (
-                        "🪐"
+                        "🎴"
                         if unit.get("premium_emoji_pre_edit")
                         else self.sanitise_text(unit["strings"][0])
                     )
@@ -381,7 +388,7 @@ class List(InlineUnit):
                         await inline_query.answer(
                             [
                                 await inline_query.builder.article(
-                                    title="Heroku",
+                                    title="Kanjo",
                                     text=page,
                                     parse_mode="HTML",
                                     link_preview=False,
@@ -397,7 +404,7 @@ class List(InlineUnit):
                             await inline_query.answer(
                                 [
                                     await inline_query.rich_article(
-                                        title="Heroku",
+                                        title="Kanjo",
                                         html=page,
                                         buttons=buttons,
                                         id=article_id,

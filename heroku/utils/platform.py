@@ -4,6 +4,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import contextlib
 import logging
 import os
@@ -114,28 +121,8 @@ def get_platform_emoji() -> str:
     :return: Emoji entity in string
     """
 
-    BASE = "".join(
-        (
-            "<tg-emoji emoji-id={}>🪐</tg-emoji>",
-            "<tg-emoji emoji-id=5352934134618549768>🪐</tg-emoji>",
-            "<tg-emoji emoji-id=5352663371290271790>🪐</tg-emoji>",
-            "<tg-emoji emoji-id=5350822883314655367>🪐</tg-emoji>",
-        )
-    )
-
-    match True:
-
-        case _ if IS_HIKKAHOST:
-            return BASE.format(5395745114494624362)
-
-        case _ if IS_USERLAND:
-            return BASE.format(5458877818031077824)
-
-        case _ if IS_DOCKER:
-            return BASE.format(5352678227582152630)
-
-        case _:
-            return BASE.format(5393588431026674882)
+    # Plain Kanjo mark. The old custom emoji ids were Heroku planet stickers.
+    return "🎴"
 
 
 def uptime() -> int:

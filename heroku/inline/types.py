@@ -681,7 +681,7 @@ class InlineQuery:
         await self.answer(
             await self._get_res(
                 title="🚫 426",
-                description="You need to update Heroku before sending this request",
+                description="You need to update Kanjo before sending this request",
                 thumbnail_url="https://img.icons8.com/fluency/344/approve-and-update.png",
             ),
             cache_time=0,

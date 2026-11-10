@@ -10,6 +10,13 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
+
 import asyncio
 import collections
 import copy
@@ -31,7 +38,7 @@ import typing
 
 from herokutl.tl.types import Message, User
 
-from . import main, utils
+from . import brand, main, utils
 from ._internal import private_write, register_secrets
 from .pointers import (
     BaseSerializingMiddlewareDict,
@@ -152,33 +159,37 @@ class Database(dict):
                 self.set("heroku.forums", "forums_cache", {"heroku-userbot": {}})
 
         if not content_channel:
+            # "heroku-userbot" is the channel title from before the Kanjo rebrand.
+            found = {}
             async for dialog in self._client.iter_dialogs():
-                if (
-                    dialog.title == "heroku-userbot"
-                    and await utils.is_private_asset_channel(
-                        self._client, dialog.entity, allow_participants=True
-                    )
+                if dialog.title not in {"kanjo-userbot", "heroku-userbot"}:
+                    continue
+                if not await utils.is_private_asset_channel(
+                    self._client, dialog.entity, allow_participants=True
                 ):
-                    content_channel = dialog.entity
-                    logger.debug(
-                        "Found existing channel '%s' with ID %s",
-                        dialog.title,
-                        dialog.entity.id,
-                    )
-                    self.set("heroku.forums", "channel_id", int(dialog.entity.id))
-                    break
+                    continue
+                found.setdefault(dialog.title, dialog.entity)
+            entity = found.get("kanjo-userbot") or found.get("heroku-userbot")
+            if entity is not None:
+                content_channel = entity
+                logger.debug(
+                    "Found existing channel '%s' with ID %s",
+                    getattr(entity, "title", None),
+                    entity.id,
+                )
+                self.set("heroku.forums", "channel_id", int(entity.id))
 
         if not content_channel:
             content_channel, _ = await utils.asset_channel(
                 client=self._client,
-                title="heroku-userbot",
-                description="🪐 Content related to Heroku will be here",
+                title="kanjo-userbot",
+                description="🎴 Kanjo. " + brand.ATTRIBUTION,
                 silent=True,
                 invite_bot=True,
-                avatar="https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku.jpg",
+                avatar=brand.ASSET_LOGO,
                 forum=True,
                 hide_general=True,
-                _folder="heroku",
+                _folder="kanjo",
                 allow_participants=True,
             )
             self.set("heroku.forums", "channel_id", int(content_channel.id))
