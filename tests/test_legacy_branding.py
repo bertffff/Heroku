@@ -49,6 +49,72 @@ class BannerMigrationTest(unittest.TestCase):
         self.assertIsNone(replacement_banner(CUSTOM, ASSET_BANNER))
         self.assertIsNone(replacement_banner(ASSET_BANNER, ASSET_BANNER))
         self.assertIsNone(replacement_banner(OLD_INFO + "?size=1", ASSET_BANNER))
+        self.assertEqual(replacement_banner(OLD_INFO, OLD_INFO), ASSET_BANNER)
+
+    def test_list_and_tuple_values_replace_only_exact_defaults(self):
+        import sys
+
+        sys.argv = ["kanjo", "--no-auth", "--no-git", "--data-root", "/tmp"]
+        import heroku.main  # finish the import cycle before validators
+        from heroku.validators import RandomLinkList
+
+        self.assertEqual(
+            replacement_banner([OLD_INFO], ASSET_BANNER),
+            [ASSET_BANNER],
+        )
+        self.assertEqual(
+            replacement_banner([OLD_INFO, CUSTOM], ASSET_BANNER),
+            [ASSET_BANNER, CUSTOM],
+        )
+        self.assertEqual(
+            replacement_banner((OLD_INFO, CUSTOM, OLD_INFO + "?x=1"), ASSET_BANNER),
+            (ASSET_BANNER, CUSTOM, OLD_INFO + "?x=1"),
+        )
+        self.assertEqual(
+            replacement_banner(RandomLinkList([OLD_INFO, CUSTOM]), ASSET_BANNER),
+            [ASSET_BANNER, CUSTOM],
+        )
+        self.assertIsNone(replacement_banner([CUSTOM], ASSET_BANNER))
+        self.assertIsNone(replacement_banner([ASSET_BANNER], ASSET_BANNER))
+        self.assertIsNone(replacement_banner([], ASSET_BANNER))
+        self.assertIsNone(replacement_banner((CUSTOM,), ASSET_BANNER))
+        self.assertIsNone(replacement_banner(None, ASSET_BANNER))
+        self.assertEqual(
+            replacement_banner([OLD_INFO, 1, CUSTOM], ASSET_BANNER),
+            [ASSET_BANNER, 1, CUSTOM],
+        )
+
+    def test_saved_random_link_list_is_rewritten_in_config(self):
+        import sys
+
+        sys.argv = ["kanjo", "--no-auth", "--no-git", "--data-root", "/tmp"]
+        import heroku.main  # finish the import cycle before validators
+        from heroku.types import ConfigValue, ModuleConfig
+        from heroku.validators import RandomLink
+
+        saved = {}
+
+        def pointer(key, default=None):
+            self.assertEqual(key, "__config__")
+            return saved
+
+        config = ModuleConfig(
+            ConfigValue(
+                "banner_url",
+                ASSET_BANNER,
+                "banner",
+                validator=RandomLink(),
+            )
+        )
+        config["banner_url"] = [OLD_INFO, CUSTOM]
+        module = SimpleNamespace(name="HerokuInfoMod", config=config, pointer=pointer)
+        self.assertEqual(
+            migrate_module_banners([module]),
+            [("HerokuInfoMod", "banner_url")],
+        )
+        self.assertEqual(list(config["banner_url"]), [ASSET_BANNER, CUSTOM])
+        self.assertEqual(saved["banner_url"], [ASSET_BANNER, CUSTOM])
+        self.assertEqual(migrate_module_banners([module]), [])
 
     def test_apply_is_idempotent_and_keeps_custom_values(self):
         class Cfg(dict):
@@ -180,6 +246,8 @@ class MigrationRunTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(done)
         self.assertEqual(module.config["banner_url"], ASSET_BANNER)
+        self.assertEqual(store["heroku.main"]["legacy_branding_version"], 2)
+        self.assertTrue(store["heroku.main"]["legacy_branding_migrated"])
         self.assertEqual(store["heroku.forums"]["forums_cache"]["kanjo-userbot"]["Assets"], 3)
         self.assertEqual(asset_topic_id(store["heroku.forums"]["forums_cache"], "Assets"), 3)
         titles = [call for call in calls if isinstance(call, EditTitleRequest)]
@@ -190,6 +258,7 @@ class MigrationRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(renames[0].name, KANJO_BOT_NAME)
         self.assertFalse(hasattr(renames[0], "username") and False)
 
+        calls_after = len(calls)
         module.config["banner_url"] = CUSTOM
         again = await run_legacy_branding(
             Db(),
@@ -200,6 +269,125 @@ class MigrationRunTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(again)
         self.assertEqual(module.config["banner_url"], CUSTOM)
+        self.assertEqual(len(calls), calls_after)
+
+    async def test_finished_install_migrates_list_banners_without_renames(self):
+        from herokutl.tl.functions.messages import GetDialogFiltersRequest
+
+        store = {"heroku.main": {"legacy_branding_migrated": True}}
+
+        class Db:
+            def get(self, owner, key, default=None):
+                return store.get(owner, {}).get(key, default)
+
+            def set(self, owner, key, value):
+                store.setdefault(owner, {})[key] = value
+
+        class Cfg(dict):
+            def getdef(self, key):
+                return ASSET_BANNER
+
+        saved = {}
+
+        def pointer(key, default=None):
+            return saved
+
+        module = SimpleNamespace(
+            name="HerokuInfoMod",
+            config=Cfg(banner_url=[OLD_INFO, CUSTOM]),
+            pointer=pointer,
+        )
+        calls = []
+
+        class Client:
+            heroku_inline = SimpleNamespace(init_complete=True, bot_username="kanjo_bot")
+
+            async def get_entity(self, ref):
+                raise AssertionError(ref)
+
+            async def __call__(self, request):
+                calls.append(request)
+                if isinstance(request, GetDialogFiltersRequest):
+                    raise AssertionError("folder rename is a finished step")
+                raise AssertionError(type(request).__name__)
+
+        done = await run_legacy_branding(
+            Db(),
+            Client(),
+            [module],
+            enabled=True,
+            inline_wait=0,
+        )
+        self.assertTrue(done)
+        self.assertEqual(calls, [])
+        self.assertEqual(module.config["banner_url"], [ASSET_BANNER, CUSTOM])
+        self.assertEqual(saved["banner_url"], [ASSET_BANNER, CUSTOM])
+        self.assertEqual(store["heroku.main"]["legacy_branding_version"], 2)
+        self.assertTrue(store["heroku.main"]["legacy_branding_migrated"])
+
+        module.config["banner_url"] = [OLD_INFO]
+        again = await run_legacy_branding(
+            Db(),
+            Client(),
+            [module],
+            enabled=True,
+            inline_wait=0,
+        )
+        self.assertFalse(again)
+        self.assertEqual(module.config["banner_url"], [OLD_INFO])
+
+    async def test_pending_bot_rename_does_not_mark_later_steps_done(self):
+        class Db:
+            def __init__(self):
+                self.store = {
+                    "heroku.main": {},
+                    "heroku.inline": {"bot_token": "1:abc"},
+                }
+
+            def get(self, owner, key, default=None):
+                return self.store.get(owner, {}).get(key, default)
+
+            def set(self, owner, key, value):
+                self.store.setdefault(owner, {})[key] = value
+
+        database = Db()
+
+        class Cfg(dict):
+            def getdef(self, key):
+                return ASSET_BANNER
+
+        module = SimpleNamespace(
+            name="HerokuInfo",
+            config=Cfg(banner_url=[OLD_INFO]),
+        )
+
+        class Client:
+            heroku_inline = SimpleNamespace(
+                init_complete=True,
+                bot_username=None,
+                _db=database,
+            )
+
+            async def get_entity(self, ref):
+                raise AssertionError(ref)
+
+            async def __call__(self, request):
+                from herokutl.tl.functions.messages import GetDialogFiltersRequest
+
+                if isinstance(request, GetDialogFiltersRequest):
+                    return SimpleNamespace(filters=[])
+                raise AssertionError(type(request).__name__)
+
+        done = await run_legacy_branding(
+            database,
+            Client(),
+            [module],
+            enabled=True,
+            inline_wait=0,
+        )
+        self.assertFalse(done)
+        self.assertNotIn("legacy_branding_version", database.store["heroku.main"])
+        self.assertEqual(module.config["banner_url"], [ASSET_BANNER])
 
     def test_retarget_keeps_topics_under_the_new_title(self):
         cache = retarget_forums_cache({"heroku-userbot": {"Logs": 9}})

@@ -384,7 +384,7 @@ settings:
   mod404: <tg-emoji emoji-id=5121063440311386962>❌</tg-emoji> <b>Watcher {} not found</b>
   _cfg_alias_emoji: "just emoji in .aliases"
   _cfg_keep_message_state: "Remember messages with commands to tell a reaction from an edit. If disabled, any update of a message with reactions is ignored"
-  _cfg_migrate_legacy_branding: "Once, replace stock Heroku banners, the default inline-bot name, the heroku-userbot channel title and the Heroku folder with Kanjo. Custom values are kept. Turn this off to skip it."
+  _cfg_migrate_legacy_branding: "Replace stock Heroku banners, the default inline-bot name, the heroku-userbot channel title and the Heroku folder with Kanjo. Custom values are kept. Finished steps are not repeated; newer steps still run after an update. Turn this off to skip it."
   universal: "🌐 Universal"
   universal_install: "🌐 <b>Universal installer</b> (Linux, WSL, UserLAnd): installs everything needed and starts Kanjo with one command:\n<pre><code class=\"language-bash\">curl -fsSL https://raw.githubusercontent.com/bertffff/Heroku/master/install.sh | bash</code></pre>\n<i>The same command run again will just start the installed Kanjo. For root, add</i> <code>-s -- --root</code>"
 

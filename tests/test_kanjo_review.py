@@ -132,7 +132,40 @@ class FolderPeersTest(unittest.TestCase):
 
 
 class BannerFallbackTest(unittest.IsolatedAsyncioTestCase):
-    async def test_remote_curl_failure_retries_local_file(self):
+    def setUp(self):
+        from heroku.banner_media import reset_banner_cache
+
+        reset_banner_cache()
+
+    async def test_builtin_banner_is_uploaded_without_a_remote_fetch(self):
+        import heroku.utils.messages as messages
+        from heroku.brand import ASSET_BANNER
+
+        seen = []
+
+        async def fake_answer(message, *args, **kwargs):
+            seen.append(kwargs.get("file"))
+            if isinstance(kwargs.get("file"), str) and kwargs["file"].startswith("http"):
+                raise WebpageCurlFailedError("404")
+            return "sent"
+
+        original = messages.answer
+        messages.answer = fake_answer
+        try:
+            result = await answer_with_media_fallback(
+                None,
+                "hello",
+                file=ASSET_BANNER,
+            )
+        finally:
+            messages.answer = original
+
+        self.assertEqual(result, "sent")
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].endswith("assets/banner.png"))
+        self.assertFalse(seen[0].startswith("http"))
+
+    async def test_custom_url_still_retries_the_local_file(self):
         import heroku.utils.messages as messages
 
         seen = []
@@ -149,13 +182,14 @@ class BannerFallbackTest(unittest.IsolatedAsyncioTestCase):
             result = await answer_with_media_fallback(
                 None,
                 "hello",
-                file="https://raw.githubusercontent.com/bertffff/Heroku/master/assets/banner.png",
+                file="https://example.com/my-banner.png",
             )
         finally:
             messages.answer = original
 
         self.assertEqual(result, "sent")
         self.assertEqual(len(seen), 2)
+        self.assertTrue(seen[0].startswith("http"))
         self.assertTrue(seen[1].endswith("assets/banner.png"))
 
     async def test_local_failure_sends_without_photo(self):

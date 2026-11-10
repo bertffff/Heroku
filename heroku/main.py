@@ -979,6 +979,34 @@ class Heroku:
                 who,
             )
 
+    async def _send_startup_badge(
+        self,
+        client: CustomTelegramClient,
+        log_chat_id,
+        message_thread_id,
+        caption: str,
+    ):
+        """Upload the stock banner, or reuse the cached file reference."""
+        try:
+            await utils.send_photo_resilient(
+                lambda photo: client.heroku_inline.bot.send_photo(
+                    log_chat_id,
+                    photo,
+                    caption=caption,
+                    message_thread_id=message_thread_id,
+                ),
+                brand.ASSET_BANNER,
+                send_text=lambda: client.heroku_inline.bot.send_message(
+                    log_chat_id,
+                    caption,
+                    message_thread_id=message_thread_id,
+                ),
+                db=getattr(client, "heroku_db", None),
+                scope="bot",
+            )
+        except Exception as badge_error:
+            logging.debug("Failed to send badge photo: %s", badge_error)
+
     async def _badge(self, client: CustomTelegramClient):
         """Call the badge in shell"""
         try:
@@ -1043,22 +1071,18 @@ class Heroku:
                     "." if pref is None else pref,
                     brand.ATTRIBUTION_HTML,
                 )
-                await utils.send_photo_resilient(
-                    lambda photo: client.heroku_inline.bot.send_photo(
+                # The photo upload must not hold startup. Cached file
+                # references make later starts a single send.
+                self._startup_badge_task = asyncio.create_task(
+                    self._send_startup_badge(
+                        client,
                         log_chat_id,
-                        photo,
-                        caption=caption,
-                        message_thread_id=message_thread_id,
-                    ),
-                    brand.ASSET_BANNER,
-                    send_text=lambda: client.heroku_inline.bot.send_message(
-                        log_chat_id,
+                        message_thread_id,
                         caption,
-                        message_thread_id=message_thread_id,
-                    ),
+                    )
                 )
             except Exception as badge_error:
-                logging.debug(f"Failed to send badge photo: {badge_error}")
+                logging.debug("Failed to schedule badge photo: %s", badge_error)
             logging.debug(
                 "· Started for %s · Prefix: «%s» ·",
                 client.tg_id,

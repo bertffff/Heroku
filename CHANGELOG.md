@@ -15,6 +15,8 @@ The user-facing name of this tree is Kanjo. It is based on Heroku Userbot 2.2.0,
 
 ## Unreleased
 
+ - rewrite list and tuple banner config values (a `RandomLink` such as `banner_url`) on installs that already finished the first branding migration; finished steps are not repeated
+ - send the built-in banner from `assets/` and reuse Telegram's file reference, including `.info`, `.help`, `.ping`, `.kanjo`, the startup badge, the backup prompt and `/start`. Custom banner URLs are unchanged
  - add opt-in Bot API / MTProto features to the inline bot (herokutl 2.2.1, layer 230), all backward compatible
  - fix button `style` and `emoji_id` being dropped on `web_app` and `copy` buttons
  - add `"disabled": True` buttons, and optional disabled current page in `build_pagination` (`disabled_current` or database key `heroku.inline` / `disabled_current_page`)

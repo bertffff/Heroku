@@ -150,6 +150,8 @@ class InlineStuff(loader.Module):
                     ),
                     brand.ASSET_BANNER,
                     send_text=lambda: message.answer(caption, reply_markup=markup),
+                    db=getattr(self, "_db", None),
+                    scope="bot",
                 )
             case "/profile":
                 if message.from_user.id != self.client.tg_id:
@@ -194,6 +196,8 @@ class InlineStuff(loader.Module):
                             caption,
                             reply_markup=markup,
                         ),
+                        db=getattr(self, "_db", None),
+                        scope="bot",
                     )
             case _:
                 return

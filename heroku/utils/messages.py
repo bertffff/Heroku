@@ -36,6 +36,12 @@ from herokutl.tl.types import (
 from .other import _copy_tl
 from .entity import get_chat_id, FormattingEntity
 
+from ..banner_media import (
+    NOT_BUILTIN,
+    builtin_asset_name,
+    is_flood,
+    send_builtin_banner,
+)
 from ..inline.types import BotInlineCall, BotInlineMessage, InlineCall, InlineMessage
 from ..types import HerokuReplyMarkup, ListLike
 
@@ -397,7 +403,91 @@ def local_file_for_photo(photo) -> str | None:
     return None
 
 
+def _banner_context(message):
+    """Database and cache scope for a user-client send."""
+    client = getattr(message, "client", None)
+    db = getattr(client, "heroku_db", None)
+    tg_id = getattr(client, "tg_id", None)
+    if tg_id is None:
+        tg_id = getattr(getattr(client, "heroku_me", None), "id", None)
+    scope = f"user:{tg_id}" if tg_id is not None else "user"
+    return db, scope
+
+
+def _strip_rich_images(html: str) -> str:
+    return re.sub(
+        r"<img\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>",
+        "",
+        html,
+        flags=re.IGNORECASE,
+    )
+
+
+class _BannerNotRemoved(Exception):
+    """The message had no photo or image tag to strip."""
+
+
+def _answer_without_photo(message, args, kwargs):
+    rich_message = kwargs.get("rich_message")
+    file = kwargs.get("file")
+    if rich_message:
+        without_images = _strip_rich_images(rich_message)
+        if without_images != rich_message:
+            kwargs["rich_message"] = without_images
+        elif not file:
+            raise _BannerNotRemoved()
+    elif not file:
+        raise _BannerNotRemoved()
+    kwargs.pop("file", None)
+    kwargs.pop("invert_media", None)
+    kwargs["link_preview"] = False
+    return answer(message, *args, **kwargs)
+
+
 async def answer_with_media_fallback(message, *args, **kwargs):
+    """Send ``file`` and, if a remote banner cannot be fetched, recover.
+
+    A built-in default (``brand.ASSET_BANNER`` and the other stock asset
+    URLs, including when they are wrapped in ``InputMediaWebPage``) is
+    uploaded from ``assets/`` and then reused via the cached file reference.
+    Custom URLs are still sent as URLs, with the local asset as a fallback.
+    ``banner_db`` and ``banner_scope`` override the cache location; otherwise
+    the user client's database is used. Flood waits propagate.
+    """
+    banner_db = kwargs.pop("banner_db", None)
+    banner_scope = kwargs.pop("banner_scope", None)
+    if banner_db is None or banner_scope is None:
+        auto_db, auto_scope = _banner_context(message)
+        if banner_db is None:
+            banner_db = auto_db
+        if banner_scope is None:
+            banner_scope = auto_scope
+
+    file = kwargs.get("file")
+    if file is not None and builtin_asset_name(file):
+
+        async def _send_file(photo):
+            kwargs["file"] = photo
+            return await answer(message, *args, **kwargs)
+
+        try:
+            sent = await send_builtin_banner(
+                _send_file,
+                file,
+                db=banner_db,
+                scope=banner_scope,
+            )
+        except Exception as error:
+            if is_flood(error):
+                raise
+            logger.warning(
+                "Built-in banner failed (%s); sending without a photo",
+                type(error).__name__,
+            )
+            return await _answer_without_photo(message, args, kwargs)
+        if sent is not NOT_BUILTIN:
+            return sent
+
     try:
         return await answer(message, *args, **kwargs)
     except Exception as error:
@@ -410,10 +500,7 @@ async def answer_with_media_fallback(message, *args, **kwargs):
             try:
                 return await answer(message, *args, **kwargs)
             except Exception as retry_error:
-                if type(retry_error).__name__ in {
-                    "FloodWaitError",
-                    "FloodPremiumWaitError",
-                }:
+                if is_flood(retry_error):
                     raise
                 logger.warning(
                     "Local banner failed (%s); sending without a photo",
@@ -424,32 +511,48 @@ async def answer_with_media_fallback(message, *args, **kwargs):
                 "Banner URL failed (%s); sending without a photo",
                 type(error).__name__,
             )
-        rich_message = kwargs.get("rich_message")
-        if rich_message:
-            without_images = re.sub(
-                r"<img\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>",
-                "",
-                rich_message,
-                flags=re.IGNORECASE,
-            )
-            if without_images != rich_message:
-                kwargs["rich_message"] = without_images
-            elif not file:
-                raise
-        elif not file and not local:
-            raise
-        kwargs.pop("file", None)
-        kwargs.pop("invert_media", None)
-        kwargs["link_preview"] = False
-    return await answer(message, *args, **kwargs)
+        try:
+            return await _answer_without_photo(message, args, kwargs)
+        except _BannerNotRemoved:
+            raise error
 
 
-async def send_photo_resilient(send_photo, photo, *, send_text):
+async def send_photo_resilient(
+    send_photo,
+    photo,
+    *,
+    send_text,
+    db=None,
+    scope: str = "bot",
+):
     """Send ``photo``, then the local asset, then text with no photo.
 
+    When ``photo`` is a built-in default, the remote URL is not sent. The
+    local file is uploaded once per sender (``scope``) and the resulting
+    file reference is reused from memory and, when ``db`` is set, from the
+    database. Custom URLs keep the previous behaviour. Flood waits propagate.
+
     ``send_photo`` is ``async (file) -> result``. ``send_text`` is used when
-    both the remote URL and the local file fail. Flood waits propagate.
+    both the remote URL and the local file fail.
     """
+    if builtin_asset_name(photo):
+        try:
+            sent = await send_builtin_banner(
+                send_photo,
+                photo,
+                db=db,
+                scope=scope,
+            )
+        except Exception as error:
+            if is_flood(error):
+                raise
+            logger.warning(
+                "Built-in banner failed (%s); sending without a photo",
+                type(error).__name__,
+            )
+            return await send_text()
+        if sent is not NOT_BUILTIN:
+            return sent
     try:
         return await send_photo(photo)
     except Exception as error:
@@ -464,7 +567,7 @@ async def send_photo_resilient(send_photo, photo, *, send_text):
         try:
             return await send_photo(local)
         except Exception as error:
-            if type(error).__name__ in {"FloodWaitError", "FloodPremiumWaitError"}:
+            if is_flood(error):
                 raise
             logger.warning(
                 "Local banner failed (%s); sending without a photo",
