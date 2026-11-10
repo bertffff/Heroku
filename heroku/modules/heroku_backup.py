@@ -55,31 +55,41 @@ class HerokuBackupMod(loader.Module):
 
     async def inline_ready(self):
         if not self.get("period"):
-            await self.inline.bot.send_photo(
-                self.tg_id,
-                photo=brand.ASSET_BANNER,
-                caption=self.strings["period"],
-                reply_markup=self.inline.generate_markup(
-                    utils.chunks(
-                        [
-                            {
-                                "text": f"🕰 {i} h",
-                                "callback": self._set_backup_period,
-                                "args": (i,),
-                            }
-                            for i in [1, 2, 4, 6, 8, 12, 24, 48, 168]
-                        ],
-                        3,
-                    )
-                    + [
-                        [
-                            {
-                                "text": "🚫 Never",
-                                "callback": self._set_backup_period,
-                                "args": (0,),
-                            }
-                        ]
+            caption = self.strings["period"]
+            markup = self.inline.generate_markup(
+                utils.chunks(
+                    [
+                        {
+                            "text": f"🕰 {i} h",
+                            "callback": self._set_backup_period,
+                            "args": (i,),
+                        }
+                        for i in [1, 2, 4, 6, 8, 12, 24, 48, 168]
+                    ],
+                    3,
+                )
+                + [
+                    [
+                        {
+                            "text": "🚫 Never",
+                            "callback": self._set_backup_period,
+                            "args": (0,),
+                        }
                     ]
+                ]
+            )
+            await utils.send_photo_resilient(
+                lambda photo: self.inline.bot.send_photo(
+                    self.tg_id,
+                    photo=photo,
+                    caption=caption,
+                    reply_markup=markup,
+                ),
+                brand.ASSET_BANNER,
+                send_text=lambda: self.inline.bot.send_message(
+                    self.tg_id,
+                    caption,
+                    reply_markup=markup,
                 ),
             )
 

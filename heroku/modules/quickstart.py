@@ -46,19 +46,28 @@ class Quickstart(loader.Module):
                         f"Saved channel ID {existing_channel_id} not found or inaccessible: {e}"
                     )
                     content_channel = None
-                    self.db.set("heroku.forums", "forums_cache", {"heroku-userbot": {}})
+                    from ..brand import empty_forums_cache
+
+                    self.db.set("heroku.forums", "forums_cache", empty_forums_cache())
 
             if not content_channel:
+                from ..brand import ASSET_CHANNEL_TITLES, preferred_asset_channel
+
+                found = {}
                 async for dialog in self.client.iter_dialogs():
-                    if dialog.title and "heroku-userbot" in dialog.title.lower():
-                        content_channel = dialog.entity
-                        logger.debug(
-                            f"Found existing channel '{dialog.title}' with ID {dialog.entity.id}"
-                        )
-                        self.db.set(
-                            "heroku.forums", "channel_id", int(dialog.entity.id)
-                        )
-                        break
+                    title = (dialog.title or "").lower()
+                    if title not in ASSET_CHANNEL_TITLES:
+                        continue
+                    found.setdefault(title, dialog.entity)
+                content_channel = preferred_asset_channel(found)
+                if content_channel is not None:
+                    logger.debug(
+                        "Found existing channel with ID %s",
+                        content_channel.id,
+                    )
+                    self.db.set(
+                        "heroku.forums", "channel_id", int(content_channel.id)
+                    )
 
             if not content_channel:
                 content_channel = await self.db.ensure_content_channel()

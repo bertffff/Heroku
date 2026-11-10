@@ -12,6 +12,12 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
 import argparse
 import asyncio
 import collections
@@ -55,7 +61,7 @@ from herokutl.tl.functions.account import GetPasswordRequest
 from herokutl.tl.functions.auth import CheckPasswordRequest
 from herokutl.tl.functions.contacts import UnblockRequest
 
-from . import brand, database, loader, version
+from . import brand, database, loader, utils, version
 from ._internal import (
     client_id_ctx,
     client_id_override,
@@ -1021,26 +1027,35 @@ class Heroku:
                     .get_logs_topic_id_by_client(client.tg_id)
                 )
 
-                await client.heroku_inline.bot.send_photo(
-                    log_chat_id,
-                    brand.ASSET_BANNER,
-                    caption=(
-                        "{} <b>{} started!</b>\n<i>{}</i>\n\n"
-                        "<b>GitHub commit SHA: <a"
-                        ' href="{}/commit/{}">{}</a></b>\n'
-                        " <b>Update status: {}</b>\n <b>Prefix:</b> <code>{}</code>\n\n{}"
-                    ).format(
-                        brand.EMOJI,
-                        brand.display_version(),
-                        brand.UPSTREAM_LABEL,
-                        brand.REPO_URL,
-                        build,
-                        build[:7],
-                        upd,
-                        "." if pref is None else pref,
-                        brand.ATTRIBUTION_HTML,
+                caption = (
+                    "{} <b>{} started!</b>\n<i>{}</i>\n\n"
+                    "<b>GitHub commit SHA: <a"
+                    ' href="{}/commit/{}">{}</a></b>\n'
+                    " <b>Update status: {}</b>\n <b>Prefix:</b> <code>{}</code>\n\n{}"
+                ).format(
+                    brand.EMOJI,
+                    brand.display_version(),
+                    brand.UPSTREAM_LABEL,
+                    brand.REPO_URL,
+                    build,
+                    build[:7],
+                    upd,
+                    "." if pref is None else pref,
+                    brand.ATTRIBUTION_HTML,
+                )
+                await utils.send_photo_resilient(
+                    lambda photo: client.heroku_inline.bot.send_photo(
+                        log_chat_id,
+                        photo,
+                        caption=caption,
+                        message_thread_id=message_thread_id,
                     ),
-                    message_thread_id=message_thread_id,
+                    brand.ASSET_BANNER,
+                    send_text=lambda: client.heroku_inline.bot.send_message(
+                        log_chat_id,
+                        caption,
+                        message_thread_id=message_thread_id,
+                    ),
                 )
             except Exception as badge_error:
                 logging.debug(f"Failed to send badge photo: {badge_error}")

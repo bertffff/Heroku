@@ -26,7 +26,8 @@ remote is renamed; the updater and install docs read this constant.
 from __future__ import annotations
 
 import os
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
+from pathlib import Path
 
 NAME = "Kanjo"
 EMOJI = "🎴"
@@ -55,6 +56,44 @@ RAW_BASE = f"https://raw.githubusercontent.com/{REPO_SLUG}/master"
 ASSET_BANNER = f"{RAW_BASE}/assets/banner.png"
 ASSET_LOGO = f"{RAW_BASE}/assets/logo.png"
 ASSET_FAVICON = f"{RAW_BASE}/assets/favicon.png"
+
+# Existing installs still use the old channel title. New ones use Kanjo.
+# Lookup prefers the legacy title when both are present.
+ASSET_CHANNEL_TITLES = ("heroku-userbot", "kanjo-userbot")
+ASSET_FOLDER_TITLES = ("heroku", "kanjo")
+
+
+def local_asset(name: str) -> Path:
+    """Path of a file under the repository ``assets`` directory."""
+    return Path(__file__).resolve().parent.parent / "assets" / name
+
+
+def empty_forums_cache() -> dict:
+    """Cache reset that keeps both channel titles addressable."""
+    return {title: {} for title in ASSET_CHANNEL_TITLES}
+
+
+def asset_topic_id(forums_cache: Mapping | None, topic_name: str):
+    """Topic id stored under either asset-channel title.
+
+    ``heroku-userbot`` wins when both buckets contain the topic, so an
+    install that already has assets keeps using them.
+    """
+    if not isinstance(forums_cache, Mapping):
+        return None
+    for title in ASSET_CHANNEL_TITLES:
+        bucket = forums_cache.get(title)
+        if isinstance(bucket, Mapping) and bucket.get(topic_name):
+            return bucket[topic_name]
+    return None
+
+
+def preferred_asset_channel(found: Mapping):
+    """Entity for an existing asset channel, legacy title first."""
+    for title in ASSET_CHANNEL_TITLES:
+        if title in found:
+            return found[title]
+    return None
 
 # HEROKU_* remains the name the rest of the code writes. KANJO_* is accepted
 # when the Heroku variable is unset or blank. A non-empty HEROKU_* wins.

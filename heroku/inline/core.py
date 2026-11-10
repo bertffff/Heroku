@@ -12,6 +12,12 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+# ©️ bertffff, 2026
+# This file is a part of Kanjo userbot
+# 🌐 https://github.com/bertffff/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
 import asyncio
 import contextlib
 import logging
@@ -39,7 +45,6 @@ from herokutl.tl.functions.messages import (
 )
 from herokutl.tl.types import (
     DialogFilter,
-    InputPeerUser,
     Message,
     SendMessageTypingAction,
     UpdateBotBusinessConnect,
@@ -66,6 +71,7 @@ from herokutl.tl.types import (
 from herokutl.utils import get_display_name
 
 from .. import main, utils
+from ..utils.entity import folder_includes_user
 from ..types import InlineDownError
 from ..database import Database
 from ..network import client_transport
@@ -82,6 +88,7 @@ from .token_obtainment import TokenObtainment
 from .utils import Utils
 
 logger = logging.getLogger(__name__)
+
 
 # RPC failures and revoked tokens must not be retried forever. A dropped
 # socket (proxy idle close, reset, WebSocket close) should.
@@ -423,12 +430,7 @@ class InlineManager(
                     getattr(folder, "title", None),
                 )
                 if str(raw_title).strip() in {"Heroku", "Kanjo"}:
-                    if any(
-                        [
-                            isinstance(peer, InputPeerUser) and peer.user_id == self.bot_id
-                            for peer in folder.include_peer
-                        ]
-                    ):
+                    if folder_includes_user(folder, self.bot_id):
                         break
 
                     pinned = [await self._client.get_input_entity(self.bot_id)]

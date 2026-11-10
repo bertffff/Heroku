@@ -64,7 +64,7 @@ python3 -m kanjo
 curl -fsSL https://raw.githubusercontent.com/bertffff/Heroku/master/install.sh | bash
 ```
 
-Повторный запуск просто стартует уже найденную копию, в том числе каталог `Heroku`. От root: `bash -s -- --root`. `HEROKU_FORCE_INSTALL=1` или `KANJO_FORCE_INSTALL=1` ставит заново.
+Повторный запуск просто стартует уже найденную копию, в том числе каталог `Heroku`. Команды выполняются от root: `bash -s -- --root`. `HEROKU_FORCE_INSTALL=1` или `KANJO_FORCE_INSTALL=1` ставит заново.
 
 ## Настройки
 

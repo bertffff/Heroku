@@ -103,6 +103,7 @@ class CoreMod(loader.Module):
         return f"{str(chatid)}.{module}" if module else chatid
 
     @loader.command(
+        alias="kanjo",
         ru_doc="Версия Kanjo, база Heroku и ссылка на репозиторий",
         en_doc="Kanjo version, Heroku base and repository link",
         ua_doc="Версія Kanjo, база Heroku і посилання на репозиторій",
@@ -148,7 +149,7 @@ class CoreMod(loader.Module):
             )
             return
 
-        await utils.answer(
+        await utils.answer_with_media_fallback(
             message,
             self.strings["heroku"].format(**version_kwargs) + (branch_text),
             file=brand.ASSET_BANNER,

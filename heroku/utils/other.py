@@ -131,7 +131,7 @@ async def invite_inline_bot(
                 channel=peer,
                 user_id=username,
                 admin_rights=ChatAdminRights(ban_users=True),
-                rank="Heroku",
+                rank="Kanjo",
             )
         )
 

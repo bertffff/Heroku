@@ -4,9 +4,9 @@
 
 Один процесс на один аккаунт Telegram. База — JSON на диске (`config-<id>.json`). Префикс команд остаётся `.`. В сборке есть английский и русский. `.update` забирает только [bertffff/Heroku](https://github.com/bertffff/Heroku). Фонового автообновления нет, и с `Heroku-userbot/Heroku` код не тянется. Адрес лежит в `REPO_URL` в `heroku/brand.py`.
 
-`eval` и `translate` не грузятся, пока их не включишь (`HEROKU_OPTIONAL_MODULES=eval,translate`, или `KANJO_OPTIONAL_MODULES`, если переменная `HEROKU_` пустая, или `optional_modules` в `config.json`). Терминал и управление аккаунтами остаются на месте.
+`eval` и `translate` не грузятся, пока их не включишь (`HEROKU_OPTIONAL_MODULES=eval,translate`, или `KANJO_OPTIONAL_MODULES`, если переменная `HEROKU_*` пустая, или `optional_modules` в `config.json`). Терминал и управление аккаунтами остаются на месте.
 
-Себя программа называет Kanjo 1.0.0. Модули по-прежнему видят совместимую версию 2.2.0.
+В интерфейсе это Kanjo 1.0.0. Модули по-прежнему видят совместимую версию 2.2.0.
 
 ## Секреты
 

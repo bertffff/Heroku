@@ -84,7 +84,7 @@ class InlineStuff(loader.Module):
         except Exception:
             return True
 
-    @loader.command()
+    @loader.command(alias="ch_kanjo_bot")
     async def ch_heroku_bot(self, message: Message):
         args = utils.get_args_raw(message).strip("@")
 
@@ -132,58 +132,67 @@ class InlineStuff(loader.Module):
     async def bot_watcher(self, message: BotInlineMessage):
         match message.text:
             case "/start":
-                await message.answer_photo(
-                    brand.ASSET_BANNER,
-                    caption=self.strings["this_is_heroku"].format(
-                        brand.EMOJI,
-                        "Kanjo",
-                    )
+                caption = (
+                    self.strings["this_is_heroku"].format(brand.EMOJI, "Kanjo")
                     + "\n\n"
-                    + brand.ATTRIBUTION_HTML,
-                    reply_markup=self.inline.generate_markup(
-                        markup_obj=[
-                            [
-                                {
-                                    "text": "GitHub",
-                                    "url": brand.REPO_URL,
-                                }
-                            ],
-                        ]
+                    + brand.ATTRIBUTION_HTML
+                )
+                markup = self.inline.generate_markup(
+                    markup_obj=[
+                        [{"text": "GitHub", "url": brand.REPO_URL}],
+                    ]
+                )
+                await utils.send_photo_resilient(
+                    lambda photo: message.answer_photo(
+                        photo,
+                        caption=caption,
+                        reply_markup=markup,
                     ),
+                    brand.ASSET_BANNER,
+                    send_text=lambda: message.answer(caption, reply_markup=markup),
                 )
             case "/profile":
                 if message.from_user.id != self.client.tg_id:
                     pass
                 else:
-                    await message.answer_photo(
-                        brand.ASSET_BANNER,
-                        caption=self.strings["profile_cmd"].format(
-                            prefix=self.get_prefix(),
-                            ram_usage=utils.get_ram_usage(),
-                            cpu_usage=utils.get_cpu_usage(),
-                            host=utils.get_named_platform(),
+                    caption = self.strings["profile_cmd"].format(
+                        prefix=self.get_prefix(),
+                        ram_usage=utils.get_ram_usage(),
+                        cpu_usage=utils.get_cpu_usage(),
+                        host=utils.get_named_platform(),
+                    )
+                    markup = self.inline.generate_markup(
+                        markup_obj=[
+                            [
+                                {
+                                    "text": "Restart",
+                                    "callback": self.restart,
+                                    "style": "primary",
+                                    "args": (message,),
+                                    "emoji_id": "5873204392429096339",
+                                }
+                            ],
+                            [
+                                {
+                                    "text": "Reset prefix",
+                                    "callback": self.reset_prefix,
+                                    "style": "primary",
+                                    "args": (message,),
+                                    "emoji_id": "5870903672937911120",
+                                }
+                            ],
+                        ]
+                    )
+                    await utils.send_photo_resilient(
+                        lambda photo: message.answer_photo(
+                            photo,
+                            caption=caption,
+                            reply_markup=markup,
                         ),
-                        reply_markup=self.inline.generate_markup(
-                            markup_obj=[
-                                [
-                                    {
-                                        "text": "Restart",
-                                        "callback": self.restart,
-                                        "style": "primary",
-                                        "args": (message,),
-                                        "emoji_id": "5873204392429096339",
-                                    }
-                                ],
-                                [
-                                    {
-                                        "text": "Reset prefix",
-                                        "callback": self.reset_prefix,
-                                        "style": "primary",
-                                        "args": (message,),
-                                        "emoji_id": "5870903672937911120",
-                                    }
-                                ],
-                            ]
+                        brand.ASSET_BANNER,
+                        send_text=lambda: message.answer(
+                            caption,
+                            reply_markup=markup,
                         ),
                     )
             case _:
