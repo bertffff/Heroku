@@ -730,6 +730,16 @@ def is_serializable(x: typing.Any, /) -> bool:
         return False
 
 
+def expandable(text: str) -> str:
+    """Wrap HTML in an expandable blockquote.
+
+    HerokuTL parses ``<blockquote expandable>`` as
+    ``MessageEntityBlockquote(collapsed=True)``. ``text`` is inserted unchanged
+    so callers can keep their own formatting.
+    """
+    return f"<blockquote expandable>{text}</blockquote>"
+
+
 def extract_urls(text: str) -> list[str]:
     """
     Extract all URLs from text

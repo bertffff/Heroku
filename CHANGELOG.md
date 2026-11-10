@@ -1,4 +1,27 @@
 # Heroku Changelog
+## Unreleased
+
+ - add opt-in Bot API / MTProto features to the inline bot (herokutl 2.2.1, layer 230), all backward compatible
+ - fix button `style` and `emoji_id` being dropped on `web_app` and `copy` buttons
+ - add `"disabled": True` buttons, and optional disabled current page in `build_pagination` (`disabled_current` or database key `heroku.inline` / `disabled_current_page`)
+ - add `call.answer_ephemeral()` and `{"action": "answer", "ephemeral": True}`; unsupported servers fall back to an alert
+ - fix `send_rich_ephemeral` so `receiver_id` is an input user
+ - add `bot.send_message_draft()` and `inline.stream()` for private-chat draft streaming
+ - add `link_preview`, `preview_size` and `preview_above` on forms and inline edits
+ - add `invert_media` on forms and galleries
+ - add `protect_content` and `message_effect_id` on direct bot sends (`TelethonBot.send_*`, `BotMessage.answer`). Inline forms sent with `sendInlineBotResult` cannot carry them
+ - register business, paid media, stars subscription, bot stopped and ephemeral button-press updates on `register_bot_update_handler`
+ - add `rich=True` for `list()` and `utils.expandable()`
+ - see `docs/INLINE_API.md`
+ - keep FloodWait on inline sends and rich list edits (do not resend without the new flags)
+ - log a warning when `protect_content` is dropped after the server rejects it
+ - add InlineStuff config `disabled_current_page` (`.config InlineStuff`, default off)
+ - add `examples/inline_qol_demo.py` (not loaded automatically)
+ - inline results send disabled buttons as a silent callback and web apps as URL buttons; `BUTTON_TYPE_INVALID` retries once
+ - keep link preview options when a form is edited after it is sent
+ - send a forced preview size as a non-optional webpage so edits do not shrink it
+ - send expandable quotes in rich lists as collapsed blocks, including page edits
+
 ## 🪐 Heroku 2.2.0
 
  - add rich messages support (rich = True) with the {img} placeholder

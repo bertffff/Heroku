@@ -18,6 +18,7 @@ import time
 import traceback
 import typing
 
+from herokutl.errors.rpcbaseerrors import RPCError
 from herokutl.errors.rpcerrorlist import FloodWaitError
 from herokutl.errors.rpcerrorlist import ChatSendInlineForbiddenError
 from herokutl.tl.types import Message
@@ -48,6 +49,7 @@ class List(InlineUnit):
         on_unload: typing.Callable[[], typing.Any] | None = None,
         silent: bool = False,
         custom_buttons: HerokuReplyMarkup | None = None,
+        rich: bool = False,
     ) -> bool | InlineMessage:
         """
         Send inline list to chat
@@ -66,6 +68,7 @@ class List(InlineUnit):
                                  If you want to disable all security checks on this list in particular, pass `disable_security=True`
         :param silent: Whether the list must be sent silently (w/o "Opening list..." message)
         :param custom_buttons: Custom buttons to add above native ones
+        :param rich: Send pages as rich messages. A rejected rich message falls back to HTML.
         :return: If list is sent, returns :obj:`InlineMessage`, otherwise returns `False`
         """
         custom_buttons = self._validate_markup(custom_buttons)
@@ -129,6 +132,13 @@ class List(InlineUnit):
         if not always_allow:
             always_allow = []
 
+        if not isinstance(rich, bool):
+            logger.error(
+                "Invalid type for `rich`. Expected `bool`, got `%s`",
+                type(rich),
+            )
+            return False
+
         if not isinstance(ttl, int) and ttl:
             logger.error(
                 "Invalid type for `ttl`. Expected `int` or `False`, got `%s`",
@@ -162,6 +172,7 @@ class List(InlineUnit):
             **({"perms_map": perms_map} if perms_map else {}),
             **({"message": message} if isinstance(message, Message) else {}),
             **({"custom_buttons": custom_buttons} if custom_buttons else {}),
+            **({"rich": True} if rich else {}),
         }
 
         btn_call_data = utils.rand(10)
@@ -249,11 +260,10 @@ class List(InlineUnit):
 
         if first_page_needs_premium_emoji_pre_edit:
             try:
-                await self._bot_client.edit_message(
+                await self._edit_list_text(
                     self._units[unit_id]["inline_message_id"],
                     self.sanitise_text(self._units[unit_id]["strings"][0]),
-                    parse_mode="HTML",
-                    buttons=self._list_markup(unit_id),
+                    unit_id,
                 )
             except Exception:
                 logger.exception("Can't apply premium emoji pre-edit for list")
@@ -288,15 +298,14 @@ class List(InlineUnit):
         self._units[unit_id]["current_index"] = page
 
         try:
-            await self._bot_client.edit_message(
+            await self._edit_list_text(
                 call.inline_message_id,
                 self.sanitise_text(
                     self._units[unit_id]["strings"][
                         self._units[unit_id]["current_index"]
                     ]
                 ),
-                parse_mode="HTML",
-                buttons=self._list_markup(unit_id),
+                unit_id,
             )
             await call.answer()
         except FloodWaitError as e:
@@ -309,6 +318,35 @@ class List(InlineUnit):
             await call.answer("Error occurred", show_alert=True)
             return
 
+    async def _edit_list_text(
+        self: "InlineManager",
+        inline_message_id,
+        text: str,
+        unit_id: str,
+    ):
+        markup = self._list_markup(unit_id)
+        if self._units[unit_id].get("rich"):
+            try:
+                await self.bot.edit_rich_message(
+                    text,
+                    inline_message_id=inline_message_id,
+                    reply_markup=markup,
+                )
+                return
+            except FloodWaitError:
+                raise
+            except (RPCError, TypeError):
+                logger.debug(
+                    "Rich list edit failed; falling back to HTML", exc_info=True
+                )
+
+        await self._bot_client.edit_message(
+            inline_message_id,
+            text,
+            parse_mode="HTML",
+            buttons=markup,
+        )
+
     def _list_markup(self: "InlineManager", unit_id: str):
         """Generates Telethon markup for `list`"""
         callback = functools.partial(self._list_page, unit_id=unit_id)
@@ -320,6 +358,7 @@ class List(InlineUnit):
                 unit_id=unit_id,
             )
             + [[{"text": "🔻 Close", "callback": callback, "args": ("close",)}]],
+            inline_safe=True,
         )
 
     async def _list_inline_handler(self: "InlineManager", inline_query):
@@ -330,23 +369,50 @@ class List(InlineUnit):
                 and unit["type"] == "list"
             ):
                 try:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.article(
-                                title="Heroku",
-                                text=(
-                                    "🪐"
-                                    if unit.get("premium_emoji_pre_edit")
-                                    else self.sanitise_text(unit["strings"][0])
-                                ),
-                                parse_mode="HTML",
-                                link_preview=False,
-                                buttons=self._list_markup(inline_query.query),
-                                id=utils.rand(20),
-                            )
-                        ],
-                        cache_time=60,
+                    page = (
+                        "🪐"
+                        if unit.get("premium_emoji_pre_edit")
+                        else self.sanitise_text(unit["strings"][0])
                     )
+                    buttons = self._list_markup(inline_query.query)
+                    article_id = utils.rand(20)
+
+                    async def answer_html():
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Heroku",
+                                    text=page,
+                                    parse_mode="HTML",
+                                    link_preview=False,
+                                    buttons=buttons,
+                                    id=article_id,
+                                )
+                            ],
+                            cache_time=60,
+                        )
+
+                    if unit.get("rich") and not unit.get("premium_emoji_pre_edit"):
+                        try:
+                            await inline_query.answer(
+                                [
+                                    await inline_query.rich_article(
+                                        title="Heroku",
+                                        html=page,
+                                        buttons=buttons,
+                                        id=article_id,
+                                    )
+                                ],
+                                cache_time=60,
+                            )
+                        except (RPCError, TypeError, ValueError):
+                            logger.debug(
+                                "Rich list result was rejected; falling back to HTML",
+                                exc_info=True,
+                            )
+                            await answer_html()
+                    else:
+                        await answer_html()
                 except Exception as e:
                     if unit["uid"] in self._error_events:
                         self._error_events[unit["uid"]].set()

@@ -21,17 +21,20 @@ import typing
 from collections.abc import Callable
 from urllib.parse import urlparse
 
+from herokutl.errors.rpcbaseerrors import RPCError
 from herokutl.errors.rpcerrorlist import (
     ChatSendInlineForbiddenError,
     FloodWaitError,
     MediaPrevInvalidError,
     MessageIdInvalidError,
+    MessageNotModifiedError,
 )
 from herokutl.tl.types import Message
 
 from .. import main, utils
 from .._internal import tag_client_id
 from ..types import HerokuReplyMarkup
+from .tl import apply_invert_media
 from .types import InlineMessage, InlineUnit
 
 if typing.TYPE_CHECKING:
@@ -71,6 +74,7 @@ class Gallery(InlineUnit):
         preload: bool | int = False,
         gif: bool = False,
         silent: bool = False,
+        invert_media: bool = False,
         _reattempt: bool = False,
     ) -> bool | InlineMessage:
         """
@@ -96,6 +100,7 @@ class Gallery(InlineUnit):
         :param disable_security: By default, Heroku will try to inherit inline buttons security from the caller (command)
                                  If you want to disable all security checks on this gallery in particular, pass `disable_security=True`
         :param silent: Whether the gallery must be sent silently (w/o "Opening gallery..." message)
+        :param invert_media: Draw captions above the photo. Default keeps the caption below.
         :return: If gallery is sent, returns :obj:`InlineMessage`, otherwise returns `False`
         """
         custom_buttons = self._validate_markup(custom_buttons)
@@ -152,6 +157,13 @@ class Gallery(InlineUnit):
 
         if not isinstance(gif, bool):
             logger.error("Invalid type for `gif`. Expected `bool`, got `%s`", type(gif))
+            return False
+
+        if not isinstance(invert_media, bool):
+            logger.error(
+                "Invalid type for `invert_media`. Expected `bool`, got `%s`",
+                type(invert_media),
+            )
             return False
 
         if (
@@ -230,6 +242,7 @@ class Gallery(InlineUnit):
             **({"on_unload": on_unload} if callable(on_unload) else {}),
             **({"preload": preload} if preload else {}),
             **({"gif": gif} if gif else {}),
+            **({"invert_media": True} if invert_media else {}),
             **({"always_allow": always_allow} if always_allow else {}),
             **({"perms_map": perms_map} if perms_map else {}),
             **({"message": message} if isinstance(message, Message) else {}),
@@ -431,20 +444,18 @@ class Gallery(InlineUnit):
     ):
         if not self._units[unit_id].get("slideshow", False):
             self._units[unit_id]["slideshow"] = True
-            await self._bot_client.edit_message(
+            await self._edit_gallery_message(
                 call.inline_message_id,
                 self._get_caption(unit_id, self._units[unit_id]["current_index"]),
-                parse_mode="HTML",
-                buttons=self._gallery_markup(unit_id),
+                unit_id,
             )
             await call.answer("✅ Slideshow on")
         else:
             del self._units[unit_id]["slideshow"]
-            await self._bot_client.edit_message(
+            await self._edit_gallery_message(
                 call.inline_message_id,
                 self._get_caption(unit_id, self._units[unit_id]["current_index"]),
-                parse_mode="HTML",
-                buttons=self._gallery_markup(unit_id),
+                unit_id,
             )
             await call.answer("🚫 Slideshow off")
             return
@@ -476,13 +487,12 @@ class Gallery(InlineUnit):
 
         try:
             media, caption, force_document = self._get_current_media(unit_id)
-            await self._bot_client.edit_message(
+            await self._edit_gallery_message(
                 call.inline_message_id,
                 caption,
-                parse_mode="HTML",
+                unit_id,
                 file=media,
                 force_document=force_document,
-                buttons=self._gallery_markup(unit_id),
             )
         except FloodWaitError as e:
             await call.answer(
@@ -579,13 +589,12 @@ class Gallery(InlineUnit):
 
         try:
             media, caption, force_document = self._get_current_media(unit_id)
-            await self._bot_client.edit_message(
+            await self._edit_gallery_message(
                 call.inline_message_id,
                 caption,
-                parse_mode="HTML",
+                unit_id,
                 file=media,
                 force_document=force_document,
-                buttons=self._gallery_markup(unit_id),
             )
         except MediaPrevInvalidError:
             logger.debug("Error fetching photo content, attempting load next one")
@@ -630,6 +639,66 @@ class Gallery(InlineUnit):
             if isinstance(caption, str)
             else caption() if callable(caption) else ""
         )
+
+    async def _edit_gallery_message(
+        self: "InlineManager",
+        inline_message_id,
+        caption: str,
+        unit_id: str,
+        *,
+        file=None,
+        force_document: bool = False,
+    ):
+        """Edit a gallery page, retrying without ``invert_media`` if it is rejected.
+
+        Flood waits and missing-media errors propagate so the callers can keep
+        their existing handling.
+        """
+        buttons = self._gallery_markup(unit_id)
+        invert = bool(self._units.get(unit_id, {}).get("invert_media"))
+
+        async def edit(use_invert: bool):
+            kwargs = {
+                "parse_mode": "HTML",
+                "buttons": buttons,
+            }
+            if file is not None:
+                kwargs["file"] = file
+                kwargs["force_document"] = force_document
+            if use_invert:
+                kwargs["invert_media"] = True
+            return await self._bot_client.edit_message(
+                inline_message_id,
+                caption,
+                **kwargs,
+            )
+
+        try:
+            return await edit(invert)
+        except TypeError:
+            if not invert:
+                raise
+            logger.debug(
+                "Gallery invert_media is not supported by this client",
+                exc_info=True,
+            )
+            return await edit(False)
+        except RPCError as exc:
+            if not invert or isinstance(
+                exc,
+                (
+                    FloodWaitError,
+                    MessageNotModifiedError,
+                    MediaPrevInvalidError,
+                    MessageIdInvalidError,
+                ),
+            ):
+                raise
+            logger.debug(
+                "Gallery invert_media was rejected (%s); retrying without it",
+                type(exc).__name__,
+            )
+            return await edit(False)
 
     def _gallery_markup(self: "InlineManager", unit_id: str):
         """Generates Telethon markup for `gallery`"""
@@ -686,6 +755,8 @@ class Gallery(InlineUnit):
                 ]
             )
             + [[{"text": "🔻 Close", "callback": callback, "args": ("close",)}]]
+            ,
+            inline_safe=True,
         )
 
     async def _gallery_inline_handler(self: "InlineManager", inline_query):
@@ -711,29 +782,22 @@ class Gallery(InlineUnit):
                     }
 
                     if unit.get("gif", False) or ext in {".gif", ".mp4"}:
-                        await inline_query.answer(
-                            [
-                                await inline_query.builder.document(
-                                    unit["photo_url"],
-                                    type="gif",
-                                    **args,
-                                )
-                            ]
+                        result = await inline_query.builder.document(
+                            unit["photo_url"],
+                            type="gif",
+                            **args,
                         )
-                        return
+                    else:
+                        result = await inline_query.builder.photo(
+                            unit["photo_url"],
+                            id=args["id"],
+                            text=args["text"],
+                            parse_mode=args["parse_mode"],
+                            buttons=args["buttons"],
+                        )
 
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.photo(
-                                unit["photo_url"],
-                                id=args["id"],
-                                text=args["text"],
-                                parse_mode=args["parse_mode"],
-                                buttons=args["buttons"],
-                            )
-                        ],
-                        cache_time=0,
-                    )
+                    apply_invert_media(result, bool(unit.get("invert_media")))
+                    await inline_query.answer([result], cache_time=0)
                 except Exception as e:
                     if unit["uid"] in self._error_events:
                         self._error_events[unit["uid"]].set()

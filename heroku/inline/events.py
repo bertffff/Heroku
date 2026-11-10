@@ -62,6 +62,7 @@ class Events(InlineUnit):
     async def _inline_handler(self: "InlineManager", inline_query):
         """Inline query handler (forms' calls)"""
         wrapped_query = InlineQuery(inline_query=inline_query)
+        wrapped_query._manager = self
         inline_query.inline_manager = self
         if (
             not self._db.get(security.__name__, "allow_inline_query", False)
@@ -160,7 +161,7 @@ class Events(InlineUnit):
                 "reply_markup": [[{"text": "­", "data": "­"}]],
             }
 
-        buttons = self.generate_markup(res.get("reply_markup"))
+        buttons = self.generate_markup(res.get("reply_markup"), inline_safe=True)
         match True:
             case _ if "message" in res:
                 return await query.builder.article(
@@ -360,7 +361,7 @@ class Events(InlineUnit):
                 await self.bot.edit_message_text(
                     text=self.sanitise_text(text),
                     inline_message_id=chosen_inline_query.msg_id,
-                    reply_markup=self.generate_markup(reply_markup),
+                    reply_markup=self.generate_markup(reply_markup, inline_safe=True),
                 )
             return
 

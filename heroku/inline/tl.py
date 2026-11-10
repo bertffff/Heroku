@@ -1,15 +1,23 @@
 import io
+import logging
+import os
+import time
 import typing
 
 from herokutl import Button
+from herokutl.errors.rpcbaseerrors import RPCError
+from herokutl.errors.rpcerrorlist import FloodWaitError
 from herokutl.extensions import html as html_parser
+from herokutl.helpers import add_surrogate, del_surrogate
 from herokutl import utils as tl_utils
 from herokutl.tl import types
 from herokutl.tl.functions.messages import (
     EditInlineBotMessageRequest,
     EditMessageRequest,
+    SendMediaRequest,
     SendMessageRequest,
     SetInlineBotResultsRequest,
+    SetTypingRequest,
 )
 from herokutl.tl.types import (
     DocumentAttributeAudio,
@@ -20,6 +28,196 @@ from herokutl.tl.types import (
 from herokutl.tl import TLObject
 
 from .._internal import normalize_rich_html
+
+logger = logging.getLogger(__name__)
+
+# Callback payload for a disabled button emulated inside an inline result.
+# InlineButtonTypeDisabled is rejected by messages.setInlineBotResults.
+INLINE_DISABLED_DATA = b"heroku-nop"
+
+
+def _rejected_delivery_flags(exc: BaseException, *, protected: bool, effect) -> tuple[bool, object] | None:
+    """Flags to keep after ``exc``, or ``None`` when the error must propagate.
+
+    Flood waits are never retried. Only errors that name an effect or a
+    no-forwards restriction drop the matching flag.
+    """
+    if isinstance(exc, FloodWaitError):
+        return None
+    if not isinstance(exc, RPCError):
+        return None
+
+    blob = f"{type(exc).__name__} {getattr(exc, 'message', '')} {exc}".lower()
+    drop_effect = "effect" in blob and effect is not None
+    drop_protect = protected and any(
+        token in blob
+        for token in (
+            "noforward",
+            "no_forward",
+            "forwards_restricted",
+            "chat_forwards",
+        )
+    )
+    if not drop_effect and not drop_protect:
+        return None
+    return (not drop_protect and protected, None if drop_effect else effect)
+
+
+async def _resend_without_rejected_flags(send, exc, *, protected: bool, effect, where: str):
+    adjusted = _rejected_delivery_flags(exc, protected=protected, effect=effect)
+    if adjusted is None:
+        raise exc
+    new_protected, new_effect = adjusted
+    if protected and not new_protected:
+        logger.warning(
+            "protect_content was rejected on %s (%s); resending without it",
+            where,
+            getattr(exc, "message", None) or type(exc).__name__,
+        )
+    if effect is not None and new_effect is None:
+        logger.debug(
+            "message_effect_id was rejected on %s (%s); resending without it",
+            where,
+            getattr(exc, "message", None) or type(exc).__name__,
+        )
+    return await send(new_protected, new_effect)
+
+
+_RICH_TEXT_WRAP = {
+    "MessageEntityBold": "TextBold",
+    "MessageEntityItalic": "TextItalic",
+    "MessageEntityUnderline": "TextUnderline",
+    "MessageEntityStrike": "TextStrike",
+    "MessageEntityCode": "TextFixed",
+    "MessageEntityPre": "TextFixed",
+    "MessageEntitySpoiler": "TextSpoiler",
+}
+
+
+def _concat_rich(parts):
+    kept = [part for part in parts if part is not None and type(part).__name__ != "TextEmpty"]
+    if not kept:
+        return types.TextEmpty()
+    if len(kept) == 1:
+        return kept[0]
+    return types.TextConcat(kept)
+
+
+def _rich_span(surrogate: str, entities: list, start: int, end: int):
+    """Turn a UTF-16 slice of parsed HTML into rich text, keeping inline styles."""
+    ordered = sorted(
+        (
+            entity
+            for entity in entities
+            if entity.offset < end and entity.offset + entity.length > start
+        ),
+        key=lambda entity: (entity.offset, -entity.length),
+    )
+    parts = []
+    cursor = start
+    index = 0
+    while cursor < end and index < len(ordered):
+        entity = ordered[index]
+        index += 1
+        if entity.offset + entity.length <= cursor:
+            continue
+        begin = max(entity.offset, cursor)
+        if begin > cursor:
+            parts.append(types.TextPlain(del_surrogate(surrogate[cursor:begin])))
+        finish = min(entity.offset + entity.length, end)
+        inner = [
+            other
+            for other in ordered
+            if other is not entity
+            and other.offset >= begin
+            and other.offset + other.length <= finish
+        ]
+        if begin < finish:
+            body = (
+                _rich_span(surrogate, inner, begin, finish)
+                if inner
+                else types.TextPlain(del_surrogate(surrogate[begin:finish]))
+            )
+        else:
+            body = types.TextEmpty()
+        wrap = _RICH_TEXT_WRAP.get(type(entity).__name__)
+        parts.append(getattr(types, wrap)(body) if wrap else body)
+        cursor = max(cursor, finish)
+    if cursor < end:
+        parts.append(types.TextPlain(del_surrogate(surrogate[cursor:end])))
+    return _concat_rich(parts)
+
+
+def input_rich_message_from_html(html: str):
+    """Build a rich message, keeping expandable quotes collapsed.
+
+    ``InputRichMessageHTML`` leaves ``<blockquote expandable>`` as an ordinary
+    quote on this layer. A collapsed ``PageBlockBlockquote`` is the rich block
+    that clients draw with the collapse arrow. HTML without one stays HTML.
+    """
+    html = normalize_rich_html(html or "")
+    text, entities = html_parser.parse(html)
+    quotes = [
+        entity
+        for entity in entities
+        if type(entity).__name__ == "MessageEntityBlockquote" and entity.collapsed
+    ]
+    if not quotes:
+        return types.InputRichMessageHTML(html=html)
+
+    surrogate = add_surrogate(text or "")
+    inline = [
+        entity
+        for entity in entities
+        if type(entity).__name__ != "MessageEntityBlockquote"
+    ]
+    blocks = []
+    cursor = 0
+    for quote in sorted(quotes, key=lambda entity: entity.offset):
+        if quote.offset > cursor:
+            lead = _rich_span(surrogate, inline, cursor, quote.offset)
+            if type(lead).__name__ != "TextEmpty":
+                blocks.append(types.PageBlockParagraph(lead))
+        body = _rich_span(
+            surrogate, inline, quote.offset, quote.offset + quote.length
+        )
+        if type(body).__name__ == "TextEmpty":
+            body = types.TextPlain("")
+        blocks.append(
+            types.PageBlockBlockquote(
+                text=body,
+                caption=types.TextEmpty(),
+                collapsed=True,
+            )
+        )
+        cursor = quote.offset + quote.length
+    if cursor < len(surrogate):
+        tail = _rich_span(surrogate, inline, cursor, len(surrogate))
+        if type(tail).__name__ != "TextEmpty":
+            blocks.append(types.PageBlockParagraph(tail))
+    if not blocks:
+        return types.InputRichMessageHTML(html=html)
+    return types.InputRichMessage(blocks=blocks)
+
+
+def _button_style(style: str | None = None, icon: int | None = None):
+    """Same colour/icon mapping as ``Button.inline``. ``None`` when both are unset."""
+    if style is None and icon is None:
+        return None
+    return Button._get_style(style, icon)
+
+
+def apply_invert_media(result, enabled: bool):
+    """Set caption-above-media on an inline result when that TL message has the flag."""
+    if not enabled or result is None:
+        return result
+
+    message = getattr(result, "send_message", None)
+    if message is None or not hasattr(message, "invert_media"):
+        return result
+
+    message.invert_media = True
+    return result
 
 
 class TelethonBot:
@@ -168,6 +366,8 @@ class TelethonBot:
         message_thread_id: int | None = None,
         disable_notification: bool | None = None,
         rich_message: str | None = None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
         **kwargs,
     ):
         if rich_message is not None:
@@ -177,30 +377,52 @@ class TelethonBot:
                 reply_markup=reply_markup,
                 message_thread_id=message_thread_id,
                 disable_notification=disable_notification,
+                protect_content=protect_content,
+                message_effect_id=message_effect_id,
             )
 
-        return self._with_message_id_alias(
-            await self.client.send_message(
-                chat_id,
-                text,
-                parse_mode="HTML",
-                buttons=reply_markup,
-                silent=(
-                    disable_notification
-                    if disable_notification is not None
-                    else kwargs.get("disable_notification")
-                ),
-                link_preview=not kwargs.get("disable_web_page_preview", False),
-                **self._thread_kwargs(message_thread_id),
-            )
+        silent = (
+            disable_notification
+            if disable_notification is not None
+            else kwargs.get("disable_notification")
         )
+        link_preview = not kwargs.get("disable_web_page_preview", False)
+
+        async def _send(protected: bool, effect):
+            return self._with_message_id_alias(
+                await self.client.send_message(
+                    chat_id,
+                    text,
+                    parse_mode="HTML",
+                    buttons=reply_markup,
+                    silent=silent,
+                    link_preview=link_preview,
+                    noforwards=bool(protected),
+                    message_effect_id=effect,
+                    **self._thread_kwargs(message_thread_id),
+                )
+            )
+
+        protected = bool(protect_content)
+        try:
+            return await _send(protected, message_effect_id)
+        except FloodWaitError:
+            raise
+        except RPCError as exc:
+            return await _resend_without_rejected_flags(
+                _send,
+                exc,
+                protected=protected,
+                effect=message_effect_id,
+                where="send_message",
+            )
 
     @staticmethod
     def _rich_input(html=None, markdown=None, rich_message=None):
         if rich_message is not None:
             return rich_message
         if html is not None:
-            return InputRichMessageHTML(html=normalize_rich_html(html))
+            return input_rich_message_from_html(html)
         if markdown is not None:
             return InputRichMessageMarkdown(markdown=markdown)
         raise ValueError("One of html, markdown or rich_message is required")
@@ -239,27 +461,50 @@ class TelethonBot:
         reply_markup=None,
         message_thread_id: int | None = None,
         disable_notification: bool | None = None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
     ):
         if html is not None and not isinstance(html, str):
             raise TypeError("html must be a str")
 
         entity = await self.client.get_input_entity(chat_id)
         rich_input = self._rich_input(html, markdown, rich_message)
-        request = SendMessageRequest(
-            peer=entity,
-            message=self._rich_fallback_text(html, markdown, rich_message),
-            no_webpage=True,
-            silent=disable_notification,
-            reply_to=(
-                InputReplyToMessage(message_thread_id)
-                if message_thread_id is not None
-                else None
-            ),
-            reply_markup=self.client.build_reply_markup(reply_markup),
-            rich_message=rich_input,
+        fallback = self._rich_fallback_text(html, markdown, rich_message)
+        markup = self.client.build_reply_markup(reply_markup)
+        reply_to = (
+            InputReplyToMessage(message_thread_id)
+            if message_thread_id is not None
+            else None
         )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, entity)
+
+        async def _send(protected: bool, effect):
+            request = SendMessageRequest(
+                peer=entity,
+                message=fallback,
+                no_webpage=True,
+                silent=disable_notification,
+                reply_to=reply_to,
+                reply_markup=markup,
+                rich_message=rich_input,
+                noforwards=True if protected else None,
+                effect=effect,
+            )
+            result = await self.client(request)
+            return self.client._get_response_message(request, result, entity)
+
+        protected = bool(protect_content)
+        try:
+            return await _send(protected, message_effect_id)
+        except FloodWaitError:
+            raise
+        except RPCError as exc:
+            return await _resend_without_rejected_flags(
+                _send,
+                exc,
+                protected=protected,
+                effect=message_effect_id,
+                where="send_rich_message",
+            )
 
     async def edit_rich_message(
         self,
@@ -299,6 +544,139 @@ class TelethonBot:
         )
         return await self.client(request)
 
+    @staticmethod
+    def _rewind(file):
+        if hasattr(file, "seek"):
+            try:
+                file.seek(0)
+            except Exception:
+                pass
+
+    async def _send_protected_media(
+        self,
+        chat_id,
+        file,
+        *,
+        caption: str | None = None,
+        reply_markup=None,
+        message_thread_id: int | None = None,
+        force_document: bool = False,
+        attributes=None,
+        thumb=None,
+        silent: bool | None = None,
+        message_effect_id: int | None = None,
+    ):
+        """``send_file`` drops ``noforwards``. Protected media goes through raw sendMedia."""
+        entity = await self.client.get_input_entity(chat_id)
+        caption_text = caption or ""
+        entities = None
+        if caption:
+            caption_text, entities = await self.client._parse_message_text(
+                caption, "html"
+            )
+
+        self._rewind(file)
+        _handle, media, _image = await self.client._file_to_media(
+            file,
+            force_document=force_document,
+            attributes=attributes,
+            thumb=thumb,
+        )
+        if media is None:
+            raise TypeError("Cannot use this file as protected media")
+
+        request = SendMediaRequest(
+            peer=entity,
+            media=media,
+            message=caption_text or "",
+            entities=entities,
+            reply_markup=self._build_reply_markup(reply_markup),
+            silent=silent,
+            reply_to=(
+                types.InputReplyToMessage(message_thread_id)
+                if message_thread_id
+                else None
+            ),
+            noforwards=True,
+            effect=message_effect_id,
+        )
+        result = await self.client(request)
+        return self._with_message_id_alias(
+            self.client._get_response_message(request, result, entity)
+        )
+
+    async def _dispatch_file(
+        self,
+        chat_id,
+        file,
+        *,
+        caption: str | None = None,
+        reply_markup=None,
+        message_thread_id: int | None = None,
+        force_document: bool = False,
+        attributes=None,
+        thumb=None,
+        silent: bool | None = None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
+        parse_html: bool = True,
+    ):
+        file = self._normalise_file(file)
+        if thumb is not None:
+            thumb = self._normalise_file(thumb)
+
+        async def via_send_file(effect):
+            self._rewind(file)
+            self._rewind(thumb)
+            send_kwargs = {
+                "caption": caption,
+                "force_document": force_document,
+                "attributes": attributes,
+                "thumb": thumb,
+                "buttons": reply_markup,
+                "silent": silent,
+                "message_effect_id": effect,
+                **self._thread_kwargs(message_thread_id),
+            }
+            if parse_html:
+                send_kwargs["parse_mode"] = "HTML"
+            return self._with_message_id_alias(
+                await self.client.send_file(chat_id, file, **send_kwargs)
+            )
+
+        async def send(protected: bool, effect):
+            if protected:
+                return await self._send_protected_media(
+                    chat_id,
+                    file,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    message_thread_id=message_thread_id,
+                    force_document=force_document,
+                    attributes=attributes,
+                    thumb=thumb,
+                    silent=silent,
+                    message_effect_id=effect,
+                )
+            return await via_send_file(effect)
+
+        protected = bool(protect_content)
+        if not protected and message_effect_id is None:
+            return await via_send_file(None)
+
+        try:
+            return await send(protected, message_effect_id)
+        except FloodWaitError:
+            raise
+        except RPCError as exc:
+            return await _resend_without_rejected_flags(
+                send,
+                exc,
+                protected=protected,
+                effect=message_effect_id,
+                where="send_file",
+            )
+
     async def send_document(
         self,
         chat_id,
@@ -307,19 +685,24 @@ class TelethonBot:
         caption: str | None = None,
         reply_markup=None,
         message_thread_id: int | None = None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
         **kwargs,
     ):
-        return self._with_message_id_alias(
-            await self.client.send_file(
-                chat_id,
-                self._normalise_file(document),
-                caption=caption,
-                parse_mode="HTML",
-                force_document=True,
-                buttons=reply_markup,
-                silent=kwargs.get("disable_notification"),
-                **self._thread_kwargs(message_thread_id),
-            )
+        return await self._dispatch_file(
+            chat_id,
+            document,
+            caption=caption,
+            reply_markup=reply_markup,
+            message_thread_id=message_thread_id,
+            force_document=True,
+            silent=kwargs.get("disable_notification"),
+            protect_content=protect_content or kwargs.get("protect_content"),
+            message_effect_id=(
+                message_effect_id
+                if message_effect_id is not None
+                else kwargs.get("message_effect_id")
+            ),
         )
 
     async def send_photo(
@@ -330,18 +713,23 @@ class TelethonBot:
         caption: str | None = None,
         reply_markup=None,
         message_thread_id: int | None = None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
         **kwargs,
     ):
-        return self._with_message_id_alias(
-            await self.client.send_file(
-                chat_id,
-                self._normalise_file(photo),
-                caption=caption,
-                parse_mode="HTML",
-                buttons=reply_markup,
-                silent=kwargs.get("disable_notification"),
-                **self._thread_kwargs(message_thread_id),
-            )
+        return await self._dispatch_file(
+            chat_id,
+            photo,
+            caption=caption,
+            reply_markup=reply_markup,
+            message_thread_id=message_thread_id,
+            silent=kwargs.get("disable_notification"),
+            protect_content=protect_content or kwargs.get("protect_content"),
+            message_effect_id=(
+                message_effect_id
+                if message_effect_id is not None
+                else kwargs.get("message_effect_id")
+            ),
         )
 
     async def send_audio(
@@ -355,6 +743,8 @@ class TelethonBot:
         thumbnail=None,
         reply_markup=None,
         message_thread_id: int | None = None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
         **kwargs,
     ):
         attributes = [
@@ -364,19 +754,119 @@ class TelethonBot:
                 performer=performer,
             )
         ]
-        return self._with_message_id_alias(
-            await self.client.send_file(
-                chat_id,
-                self._normalise_file(audio),
-                attributes=attributes,
-                thumb=(
-                    self._normalise_file(thumbnail) if thumbnail is not None else None
-                ),
-                buttons=reply_markup,
-                silent=kwargs.get("disable_notification"),
-                **self._thread_kwargs(message_thread_id),
-            )
+        return await self._dispatch_file(
+            chat_id,
+            audio,
+            reply_markup=reply_markup,
+            message_thread_id=message_thread_id,
+            attributes=attributes,
+            thumb=thumbnail,
+            silent=kwargs.get("disable_notification"),
+            protect_content=protect_content or kwargs.get("protect_content"),
+            message_effect_id=(
+                message_effect_id
+                if message_effect_id is not None
+                else kwargs.get("message_effect_id")
+            ),
+            parse_html=False,
         )
+
+    async def _private_input_peer(self, chat_id):
+        try:
+            entity = await self.client.get_input_entity(chat_id)
+        except Exception:
+            logger.debug("Draft peer lookup failed for %r", chat_id, exc_info=True)
+            return None
+
+        if isinstance(entity, (types.InputPeerUser, types.InputPeerSelf)):
+            return entity
+
+        logger.debug(
+            "Message drafts are limited to private chats (got %s)",
+            type(entity).__name__,
+        )
+        return None
+
+    async def send_message_draft(
+        self,
+        chat_id,
+        text: str = "",
+        *,
+        draft_id: int,
+        entities=None,
+        can_stop: bool | None = None,
+        keep_on_stop: bool | None = None,
+        message_thread_id: int | None = None,
+    ):
+        """Stream a temporary draft into a private chat (bot PM).
+
+        Empty text is a valid "Thinking…" draft. Unsupported servers fall back
+        to a plain typing action. Returns ``False`` outside private chats.
+        """
+        entity = await self._private_input_peer(chat_id)
+        if entity is None:
+            return False
+
+        if entities is None:
+            try:
+                text, entities = await self.client._parse_message_text(text or "", "html")
+            except Exception:
+                logger.debug("Draft HTML parse failed", exc_info=True)
+                entities = []
+
+        action = types.SendMessageTextDraftAction(
+            text=types.TextWithEntities(text=text or "", entities=list(entities or [])),
+            random_id=draft_id,
+            can_stop=can_stop,
+            keep_on_stop=keep_on_stop,
+        )
+        try:
+            return await self.client(
+                SetTypingRequest(
+                    peer=entity,
+                    action=action,
+                    top_msg_id=message_thread_id,
+                )
+            )
+        except RPCError:
+            logger.debug(
+                "Text draft is unsupported; falling back to a typing action",
+                exc_info=True,
+            )
+            try:
+                return await self.client(
+                    SetTypingRequest(
+                        peer=entity,
+                        action=types.SendMessageTypingAction(),
+                        top_msg_id=message_thread_id,
+                    )
+                )
+            except RPCError:
+                logger.debug("Typing fallback failed", exc_info=True)
+                return False
+
+    async def stop_message_draft(
+        self,
+        chat_id,
+        draft_id: int,
+        *,
+        message_thread_id: int | None = None,
+    ):
+        entity = await self._private_input_peer(chat_id)
+        if entity is None:
+            return False
+
+        try:
+            return await self.client(
+                SetTypingRequest(
+                    peer=entity,
+                    action=types.SendMessageStopDraftAction(random_id=draft_id),
+                    top_msg_id=message_thread_id,
+                )
+            )
+        except RPCError:
+            logger.debug("Stop-draft action failed", exc_info=True)
+            return False
 
     async def delete_message(self, chat_id, message_id):
         return await self.client.delete_messages(chat_id, message_id)
@@ -529,7 +1019,24 @@ def make_button(
     switch_inline_query: str | None = None,
     web_app: str | dict | None = None,
     copy_text: str | None = None,
+    disabled: bool = False,
 ):
+    style_obj = _button_style(style, icon)
+
+    if disabled:
+        try:
+            return types.KeyboardInlineButton(
+                text,
+                types.InlineButtonTypeDisabled(),
+                style=style_obj,
+            )
+        except Exception:
+            logger.debug(
+                "InlineButtonTypeDisabled is unavailable; using a placeholder button",
+                exc_info=True,
+            )
+            return Button.inline(text, "­", style=style, icon=icon)
+
     if url is not None:
         return Button.url(text, url, style=style, icon=icon)
 
@@ -556,9 +1063,127 @@ def make_button(
 
     if web_app is not None:
         app_url = web_app if isinstance(web_app, str) else web_app["url"]
-        return types.KeyboardInlineButton(text, types.InlineButtonTypeWebView(url=app_url))
+        return types.KeyboardInlineButton(
+            text,
+            types.InlineButtonTypeWebView(url=app_url),
+            style=style_obj,
+        )
 
     if copy_text is not None:
-        return types.KeyboardInlineButton(text, types.InlineButtonTypeCopy(copy_text=copy_text))
+        return types.KeyboardInlineButton(
+            text,
+            types.InlineButtonTypeCopy(copy_text=copy_text),
+            style=style_obj,
+        )
 
     return Button.inline(text, text, style=style, icon=icon)
+
+
+def soften_inline_button(button) -> bool:
+    """Replace button types Telegram rejects inside inline results.
+
+    ``ButtonTypeSimpleWebView`` is a reply-keyboard type, not an inline button,
+    so a web app becomes a URL. A disabled button becomes a callback the userbot
+    answers with an empty toast.
+    """
+    kind = type(getattr(button, "type", None)).__name__
+    if kind == "InlineButtonTypeWebView":
+        url = getattr(button.type, "url", None) or ""
+        button.type = types.InlineButtonTypeUrl(url=url)
+        return True
+    if kind == "InlineButtonTypeDisabled":
+        button.type = types.InlineButtonTypeCallback(data=INLINE_DISABLED_DATA)
+        return True
+    return False
+
+
+def soften_inline_result(result) -> bool:
+    """Rewrite unsafe buttons on one inline result. Returns True if any changed."""
+    message = getattr(result, "send_message", None)
+    markup = getattr(message, "reply_markup", None)
+    changed = False
+    for row in getattr(markup, "rows", None) or []:
+        for button in getattr(row, "buttons", None) or []:
+            changed = soften_inline_button(button) or changed
+    return changed
+
+
+class DraftStream:
+    """Throttled private-chat draft that ends as a real message.
+
+    Drafts are a ~30 second preview. ``update`` is throttled (default 0.7s,
+    4096 characters). On a clean exit the latest text is sent with
+    ``send_message``. A non-private chat skips the draft and still sends the
+    final message.
+    """
+
+    def __init__(
+        self,
+        bot: TelethonBot,
+        chat_id,
+        *,
+        min_interval: float = 0.7,
+        can_stop: bool | None = None,
+        keep_on_stop: bool | None = None,
+        message_thread_id: int | None = None,
+        reply_markup=None,
+        protect_content: bool | None = None,
+        message_effect_id: int | None = None,
+    ):
+        self.bot = bot
+        self.chat_id = chat_id
+        self.min_interval = min_interval
+        self.can_stop = can_stop
+        self.keep_on_stop = keep_on_stop
+        self.message_thread_id = message_thread_id
+        self.reply_markup = reply_markup
+        self.protect_content = protect_content
+        self.message_effect_id = message_effect_id
+        self.draft_id = int.from_bytes(os.urandom(8), "big", signed=True)
+        self.text = ""
+        self._last_sent = 0.0
+        self._last_payload = None
+
+    async def __aenter__(self):
+        await self._push("Thinking…", force=True)
+        return self
+
+    async def update(self, text: str):
+        self.text = (text or "")[:4096]
+        await self._push(self.text, force=False)
+
+    async def _push(self, text: str, *, force: bool):
+        now = time.monotonic()
+        if not force and text == self._last_payload:
+            return
+        if not force and now - self._last_sent < self.min_interval:
+            return
+
+        sent = await self.bot.send_message_draft(
+            self.chat_id,
+            text,
+            draft_id=self.draft_id,
+            can_stop=self.can_stop,
+            keep_on_stop=self.keep_on_stop,
+            message_thread_id=self.message_thread_id,
+        )
+        self._last_sent = now
+        if sent is not False:
+            self._last_payload = text
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.bot.stop_message_draft(
+            self.chat_id,
+            self.draft_id,
+            message_thread_id=self.message_thread_id,
+        )
+        if exc_type is None and self.text:
+            await self.bot.send_message(
+                self.chat_id,
+                self.text,
+                reply_markup=self.reply_markup,
+                message_thread_id=self.message_thread_id,
+                protect_content=self.protect_content,
+                message_effect_id=self.message_effect_id,
+            )
+        return False

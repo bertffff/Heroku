@@ -26,6 +26,16 @@ class InlineStuff(loader.Module):
 
     strings = {"name": "InlineStuff"}
 
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "disabled_current_page",
+                False,
+                lambda: self.strings["_cfg_disabled_current_page"],
+                validator=loader.validators.Boolean(),
+            ),
+        )
+
     @loader.watcher(
         "out",
         "only_inline",
