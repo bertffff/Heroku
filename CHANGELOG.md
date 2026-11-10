@@ -19,6 +19,8 @@
  - add `examples/inline_qol_demo.py` (not loaded automatically)
  - inline results send disabled buttons as a silent callback and web apps as URL buttons; `BUTTON_TYPE_INVALID` retries once
  - keep link preview options when a form is edited after it is sent
+ - send a forced preview size as a non-optional webpage so edits do not shrink it
+ - send expandable quotes in rich lists as collapsed blocks, including page edits
 
 ## 🪐 Heroku 2.2.0
 

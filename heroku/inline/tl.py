@@ -8,6 +8,7 @@ from herokutl import Button
 from herokutl.errors.rpcbaseerrors import RPCError
 from herokutl.errors.rpcerrorlist import FloodWaitError
 from herokutl.extensions import html as html_parser
+from herokutl.helpers import add_surrogate, del_surrogate
 from herokutl import utils as tl_utils
 from herokutl.tl import types
 from herokutl.tl.functions.messages import (
@@ -80,6 +81,123 @@ async def _resend_without_rejected_flags(send, exc, *, protected: bool, effect, 
             getattr(exc, "message", None) or type(exc).__name__,
         )
     return await send(new_protected, new_effect)
+
+
+_RICH_TEXT_WRAP = {
+    "MessageEntityBold": "TextBold",
+    "MessageEntityItalic": "TextItalic",
+    "MessageEntityUnderline": "TextUnderline",
+    "MessageEntityStrike": "TextStrike",
+    "MessageEntityCode": "TextFixed",
+    "MessageEntityPre": "TextFixed",
+    "MessageEntitySpoiler": "TextSpoiler",
+}
+
+
+def _concat_rich(parts):
+    kept = [part for part in parts if part is not None and type(part).__name__ != "TextEmpty"]
+    if not kept:
+        return types.TextEmpty()
+    if len(kept) == 1:
+        return kept[0]
+    return types.TextConcat(kept)
+
+
+def _rich_span(surrogate: str, entities: list, start: int, end: int):
+    """Turn a UTF-16 slice of parsed HTML into rich text, keeping inline styles."""
+    ordered = sorted(
+        (
+            entity
+            for entity in entities
+            if entity.offset < end and entity.offset + entity.length > start
+        ),
+        key=lambda entity: (entity.offset, -entity.length),
+    )
+    parts = []
+    cursor = start
+    index = 0
+    while cursor < end and index < len(ordered):
+        entity = ordered[index]
+        index += 1
+        if entity.offset + entity.length <= cursor:
+            continue
+        begin = max(entity.offset, cursor)
+        if begin > cursor:
+            parts.append(types.TextPlain(del_surrogate(surrogate[cursor:begin])))
+        finish = min(entity.offset + entity.length, end)
+        inner = [
+            other
+            for other in ordered
+            if other is not entity
+            and other.offset >= begin
+            and other.offset + other.length <= finish
+        ]
+        if begin < finish:
+            body = (
+                _rich_span(surrogate, inner, begin, finish)
+                if inner
+                else types.TextPlain(del_surrogate(surrogate[begin:finish]))
+            )
+        else:
+            body = types.TextEmpty()
+        wrap = _RICH_TEXT_WRAP.get(type(entity).__name__)
+        parts.append(getattr(types, wrap)(body) if wrap else body)
+        cursor = max(cursor, finish)
+    if cursor < end:
+        parts.append(types.TextPlain(del_surrogate(surrogate[cursor:end])))
+    return _concat_rich(parts)
+
+
+def input_rich_message_from_html(html: str):
+    """Build a rich message, keeping expandable quotes collapsed.
+
+    ``InputRichMessageHTML`` leaves ``<blockquote expandable>`` as an ordinary
+    quote on this layer. A collapsed ``PageBlockBlockquote`` is the rich block
+    that clients draw with the collapse arrow. HTML without one stays HTML.
+    """
+    html = normalize_rich_html(html or "")
+    text, entities = html_parser.parse(html)
+    quotes = [
+        entity
+        for entity in entities
+        if type(entity).__name__ == "MessageEntityBlockquote" and entity.collapsed
+    ]
+    if not quotes:
+        return types.InputRichMessageHTML(html=html)
+
+    surrogate = add_surrogate(text or "")
+    inline = [
+        entity
+        for entity in entities
+        if type(entity).__name__ != "MessageEntityBlockquote"
+    ]
+    blocks = []
+    cursor = 0
+    for quote in sorted(quotes, key=lambda entity: entity.offset):
+        if quote.offset > cursor:
+            lead = _rich_span(surrogate, inline, cursor, quote.offset)
+            if type(lead).__name__ != "TextEmpty":
+                blocks.append(types.PageBlockParagraph(lead))
+        body = _rich_span(
+            surrogate, inline, quote.offset, quote.offset + quote.length
+        )
+        if type(body).__name__ == "TextEmpty":
+            body = types.TextPlain("")
+        blocks.append(
+            types.PageBlockBlockquote(
+                text=body,
+                caption=types.TextEmpty(),
+                collapsed=True,
+            )
+        )
+        cursor = quote.offset + quote.length
+    if cursor < len(surrogate):
+        tail = _rich_span(surrogate, inline, cursor, len(surrogate))
+        if type(tail).__name__ != "TextEmpty":
+            blocks.append(types.PageBlockParagraph(tail))
+    if not blocks:
+        return types.InputRichMessageHTML(html=html)
+    return types.InputRichMessage(blocks=blocks)
 
 
 def _button_style(style: str | None = None, icon: int | None = None):
@@ -304,7 +422,7 @@ class TelethonBot:
         if rich_message is not None:
             return rich_message
         if html is not None:
-            return InputRichMessageHTML(html=normalize_rich_html(html))
+            return input_rich_message_from_html(html)
         if markdown is not None:
             return InputRichMessageMarkdown(markdown=markdown)
         raise ValueError("One of html, markdown or rich_message is required")

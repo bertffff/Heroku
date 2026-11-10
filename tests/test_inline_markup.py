@@ -721,9 +721,49 @@ class PreviewAndRichTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(webpage, types.InputMediaWebPage)
         self.assertEqual(webpage.url, "https://telegram.org")
         self.assertTrue(webpage.force_large_media)
-        self.assertTrue(webpage.optional)
+        self.assertFalse(webpage.force_small_media)
+        self.assertIsNone(webpage.optional)
+        flags = int.from_bytes(webpage._bytes()[4:8], "little")
+        self.assertTrue(flags & 1)
+        self.assertFalse(flags & 2)
         self.assertTrue(calls[0]["invert_media"])
         self.assertTrue(calls[0]["link_preview"])
+
+    async def test_expandable_quote_stays_collapsed_on_rich_and_html(self):
+        from herokutl.extensions import html as html_parser
+        from herokutl.tl.types import MessageEntityBlockquote
+
+        from heroku.inline.tl import TelethonBot, input_rich_message_from_html
+        from heroku.utils.messages import expandable
+
+        html = "<b>Page 1</b>\n" + expandable(
+            "Line one of the quote\nLine two\nLine three\nLine four"
+        )
+        rich = input_rich_message_from_html(html)
+        quotes = [
+            block
+            for block in rich.blocks
+            if type(block).__name__ == "PageBlockBlockquote"
+        ]
+        self.assertEqual(len(quotes), 1)
+        self.assertTrue(quotes[0].collapsed)
+        same = TelethonBot._rich_input(html=html)
+        self.assertTrue(
+            any(
+                type(block).__name__ == "PageBlockBlockquote" and block.collapsed
+                for block in same.blocks
+            )
+        )
+
+        plain, entities = html_parser.parse(html)
+        collapsed = [
+            entity
+            for entity in entities
+            if isinstance(entity, MessageEntityBlockquote) and entity.collapsed
+        ]
+        self.assertEqual(len(collapsed), 1)
+        self.assertIn("Line one of the quote", plain)
+        self.assertIn("Line four", plain)
 
     async def test_webpage_article_flags(self):
         class Builder:
@@ -746,8 +786,12 @@ class PreviewAndRichTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(message, types.InputBotInlineMessageMediaWebPage)
         self.assertEqual(message.url, "https://example.com")
         self.assertTrue(message.force_large_media)
+        self.assertFalse(message.force_small_media)
+        self.assertIsNone(message.optional)
         self.assertTrue(message.invert_media)
-        self.assertTrue(message.optional)
+        flags = int.from_bytes(message._bytes()[4:8], "little")
+        self.assertTrue(flags & 16)
+        self.assertFalse(flags & 32)
         self.assertEqual(message.message, "hello there")
         self.assertEqual(result.id, "fixed")
 
@@ -774,7 +818,8 @@ class PreviewAndRichTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok)
         self.assertIsInstance(calls[0][1]["file"], types.InputMediaWebPage)
         self.assertTrue(calls[0][1]["file"].force_small_media)
-        self.assertTrue(calls[0][1]["file"].optional)
+        self.assertFalse(calls[0][1]["file"].force_large_media)
+        self.assertIsNone(calls[0][1]["file"].optional)
         self.assertTrue(calls[0][1]["invert_media"])
         self.assertTrue(calls[0][1]["link_preview"])
         self.assertNotIn("file", calls[1][1])

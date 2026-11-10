@@ -7,8 +7,6 @@ from herokutl.errors.rpcbaseerrors import RPCError
 from herokutl.tl import types
 from herokutl.tl.functions import ephemeral
 
-from .._internal import normalize_rich_html
-
 HerokuReplyMarkup = typing.Union[list[list[dict]], list[dict], dict]
 
 logger = logging.getLogger(__name__)
@@ -520,9 +518,9 @@ class InlineQuery:
     ):
         if rich_message is None:
             if html is not None:
-                rich_message = types.InputRichMessageHTML(
-                    html=normalize_rich_html(html)
-                )
+                from .tl import input_rich_message_from_html
+
+                rich_message = input_rich_message_from_html(html)
             elif markdown is not None:
                 rich_message = types.InputRichMessageMarkdown(markdown=markdown)
             else:
@@ -585,7 +583,9 @@ class InlineQuery:
                 force_large_media=True if preview_size == "large" else None,
                 force_small_media=True if preview_size == "small" else None,
                 invert_media=True if preview_above else None,
-                optional=True,
+                # A forced size must not be optional: optional lets the server
+                # substitute its cached small card and drop force_large_media.
+                optional=None if preview_size else True,
                 reply_markup=markup,
             ),
         )

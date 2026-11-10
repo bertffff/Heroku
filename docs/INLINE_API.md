@@ -100,7 +100,9 @@ On `form()` and on `InlineMessage.edit` / `_edit_unit`:
 | `preview_above=True` | preview above the text |
 
 `optional=True` is set on the webpage so a bad URL does not fail the whole
-send. A rejected preview edit is retried as a plain text edit.
+send, except when `preview_size` is set. A forced large or small card is not
+optional, or the edit replaces it with the compact thumbnail. A rejected
+preview edit is retried as a plain text edit.
 
 A form with no buttons is edited once after it is delivered, to remove the
 placeholder button Telegram needs in order to edit the message. That edit
@@ -169,6 +171,11 @@ await self.inline.list(message, ["<b>Page</b>"], rich=True)
 ```
 
 A rejected rich result or edit is sent again as HTML.
+
+`<blockquote expandable>` in a rich list is sent as a collapsed rich quote
+(`PageBlockBlockquote.collapsed`), including when the page is edited. The
+HTML fallback keeps the same tag, which the normal parser maps to
+`MessageEntityBlockquote(collapsed=True)`.
 
 ```python
 from heroku import utils

@@ -803,7 +803,9 @@ class Utils(InlineUnit):
                 url=url,
                 force_large_media=True if preview_size == "large" else None,
                 force_small_media=True if preview_size == "small" else None,
-                optional=True,
+                # Same rule as the inline result: a forced size is not optional,
+                # or the edit replaces a large card with the compact thumbnail.
+                optional=None if preview_size else True,
             )
             show = True
 
