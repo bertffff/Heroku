@@ -101,7 +101,13 @@ class InlineQoLDemoMod(loader.Module):
         await self.inline.list(
             message,
             [
-                "<b>Page 1</b>\n" + utils.expandable("Hidden detail on the first page"),
+                "<b>Page 1</b>\n"
+                + utils.expandable(
+                    "This block is collapsed until you tap it.\n"
+                    "Line two is here so the quote is taller than one row.\n"
+                    "Line three keeps going with a bit more detail.\n"
+                    "Line four is the last one in the demo."
+                ),
                 "<b>Page 2</b>\nSecond page, still rich.",
             ],
             rich=True,

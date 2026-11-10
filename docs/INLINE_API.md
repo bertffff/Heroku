@@ -23,10 +23,16 @@ including `web_app` and `copy`.
 }
 ```
 
-`{"text": "Later", "disabled": True}` builds `InlineButtonTypeDisabled`. A
-disabled button does not register a callback, even if `callback` is also set.
-If the constructor is missing, the button becomes an inert placeholder
-(`data="­"`).
+`{"text": "Later", "disabled": True}` builds `InlineButtonTypeDisabled` on
+messages the bot sends itself. A disabled button does not register a user
+callback, even if `callback` is also set. Inline results
+(`messages.setInlineBotResults`) reject that type and also reject `web_app`
+(`InlineButtonTypeWebView`; `ButtonTypeSimpleWebView` is a reply-keyboard
+button, not an inline one). Forms, lists and galleries therefore send a
+disabled button as a silent callback and a web app as a URL button, keeping
+`style` and `emoji_id`. If the server still returns `BUTTON_TYPE_INVALID`,
+the result is rebuilt once and resent, with a single warning. Copy buttons
+stay copy buttons.
 
 Icons only render for bots with a Fragment username, or on messages the bot
 sends directly in a private or group chat when the bot owner has Premium.
@@ -95,6 +101,12 @@ On `form()` and on `InlineMessage.edit` / `_edit_unit`:
 
 `optional=True` is set on the webpage so a bad URL does not fail the whole
 send. A rejected preview edit is retried as a plain text edit.
+
+A form with no buttons is edited once after it is delivered, to remove the
+placeholder button Telegram needs in order to edit the message. That edit
+keeps `link_preview`, `preview_size`, `preview_above` and `invert_media`.
+Later `msg.edit(text)` calls do the same unless you pass a new value
+(`link_preview=False` turns the card off).
 
 ```python
 await self.inline.form(

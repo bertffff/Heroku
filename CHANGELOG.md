@@ -17,6 +17,8 @@
  - log a warning when `protect_content` is dropped after the server rejects it
  - add InlineStuff config `disabled_current_page` (`.config InlineStuff`, default off)
  - add `examples/inline_qol_demo.py` (not loaded automatically)
+ - inline results send disabled buttons as a silent callback and web apps as URL buttons; `BUTTON_TYPE_INVALID` retries once
+ - keep link preview options when a form is edited after it is sent
 
 ## 🪐 Heroku 2.2.0
 

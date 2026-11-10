@@ -33,7 +33,7 @@ from herokutl.tl.types import InputMediaWebPage
 
 from .. import utils
 from ..types import HerokuReplyMarkup
-from .tl import DraftStream, make_button
+from .tl import INLINE_DISABLED_DATA, DraftStream, make_button
 from .types import InlineCall, InlineUnit
 
 if typing.TYPE_CHECKING:
@@ -73,11 +73,41 @@ class Utils(InlineUnit):
             return str(emoji_id).strip()
         return None
 
+    def _ensure_inline_disabled_noop(self: "InlineManager"):
+        """Register the silent callback used when a disabled button cannot be sent."""
+        data = INLINE_DISABLED_DATA.decode()
+        if data in self._custom_map:
+            return
+        self._custom_map[data] = {
+            "handler": self._disabled_inline_button,
+            "always_allow": [],
+            "args": [],
+            "kwargs": {},
+            "force_me": False,
+            "disable_security": True,
+        }
+
+    async def _disabled_inline_button(self: "InlineManager", call: InlineCall):
+        """Answer a disabled inline button with an empty toast. No user callback runs."""
+        try:
+            await call.answer()
+        except Exception:
+            logger.debug(
+                "Silent answer for an emulated disabled button failed", exc_info=True
+            )
+
     def _generate_markup(
         self: "InlineManager",
         markup_obj: HerokuReplyMarkup | str | None,
+        *,
+        inline_safe: bool = False,
     ) -> list[list[typing.Any]] | None:
-        """Generate markup for form or list of `dict`s"""
+        """Generate markup for form or list of `dict`s.
+
+        ``inline_safe`` rewrites types ``messages.setInlineBotResults`` rejects:
+        web apps become URL buttons (same colour and icon) and disabled buttons
+        become a silent callback. Direct bot messages keep the original types.
+        """
         if not markup_obj:
             return None
 
@@ -157,7 +187,15 @@ class Utils(InlineUnit):
 
                     match True:
                         case _ if button.get("disabled"):
-                            btn_kwargs["disabled"] = True
+                            if inline_safe:
+                                self._ensure_inline_disabled_noop()
+                                btn_kwargs["data"] = INLINE_DISABLED_DATA.decode()
+                                logger.debug(
+                                    "Disabled buttons are not sent in inline results; "
+                                    "using a silent callback"
+                                )
+                            else:
+                                btn_kwargs["disabled"] = True
 
                         case _ if "url" in button:
                             if not utils.check_url(button["url"]):
@@ -193,7 +231,22 @@ class Utils(InlineUnit):
                             btn_kwargs["data"] = button["data"]
 
                         case _ if "web_app" in button:
-                            btn_kwargs["web_app"] = button["web_app"]
+                            if inline_safe:
+                                app = button["web_app"]
+                                app_url = app if isinstance(app, str) else app.get("url")
+                                if not app_url or not utils.check_url(app_url):
+                                    logger.debug(
+                                        "Skipping inline web_app button with an invalid url"
+                                    )
+                                    continue
+                                # ButtonTypeSimpleWebView is a reply-keyboard type.
+                                # Inline results have no equivalent, so this is a URL.
+                                logger.debug(
+                                    "web_app is not valid in inline results; using a URL button"
+                                )
+                                btn_kwargs["url"] = app_url
+                            else:
+                                btn_kwargs["web_app"] = button["web_app"]
 
                         case _ if "copy" in button:
                             btn_kwargs["copy_text"] = button["copy"]
@@ -360,7 +413,7 @@ class Utils(InlineUnit):
         message_id: int | None = None,
         link_preview: str | bool | None = None,
         preview_size: str | None = None,
-        preview_above: bool = False,
+        preview_above: bool | None = None,
         invert_media: bool | None = None,
     ) -> bool:
         """
@@ -381,7 +434,8 @@ class Utils(InlineUnit):
             ``disable_web_page_preview`` is false). ``True`` lets Telegram pick a
             preview from the text. A URL builds an ``InputMediaWebPage``.
         :param preview_size: ``"large"`` or ``"small"`` webpage media
-        :param preview_above: Show the link preview above the text
+        :param preview_above: Show the link preview above the text.
+            ``None`` keeps the value stored on the unit.
         :param invert_media: Caption above media, when the edit carries media
         :param query: Callback query
         :return: Status of edit
@@ -452,6 +506,22 @@ class Utils(InlineUnit):
             or unit.get("inline_message_id", False)
             or getattr(query, "inline_message_id", None)
         )
+        (
+            link_preview,
+            preview_size,
+            preview_above,
+            invert_media,
+        ) = self._inherit_unit_preview(
+            unit,
+            link_preview=link_preview,
+            preview_size=preview_size,
+            preview_above=preview_above,
+            invert_media=invert_media,
+        )
+        inline_safe = bool(inline_message_id)
+
+        def markup_for(source):
+            return self.generate_markup(source, inline_safe=inline_safe)
 
         if not chat_id and not message_id and not inline_message_id:
             logger.warning(
@@ -501,7 +571,7 @@ class Utils(InlineUnit):
                 await self._bot_client.edit_message(
                     inline_message_id or chat_id,
                     (unit.get("text") or "") if inline_message_id else message_id,
-                    buttons=self.generate_markup(reply_markup),
+                    buttons=markup_for(reply_markup),
                 )
             except Exception:
                 return False
@@ -522,7 +592,7 @@ class Utils(InlineUnit):
                 preview_above=preview_above,
                 invert_media=invert_media,
             )
-            buttons = self.generate_markup(
+            buttons = markup_for(
                 reply_markup
                 if isinstance(reply_markup, list)
                 else unit.get("buttons", [])
@@ -622,7 +692,7 @@ class Utils(InlineUnit):
                 commit_unit_update()
                 return True
 
-        media_buttons = self.generate_markup(
+        media_buttons = markup_for(
             reply_markup
             if isinstance(reply_markup, list)
             else unit.get("buttons", [])
@@ -695,7 +765,7 @@ class Utils(InlineUnit):
         disable_web_page_preview: bool,
         link_preview: str | bool | None,
         preview_size: str | None,
-        preview_above: bool,
+        preview_above: bool | None,
         invert_media: bool | None,
     ) -> tuple[bool, InputMediaWebPage | None, bool]:
         """Resolve link-preview kwargs into edit_message arguments.
@@ -703,6 +773,8 @@ class Utils(InlineUnit):
         Defaults match the historical edit: preview off unless
         ``disable_web_page_preview`` is false.
         """
+        if preview_above is None:
+            preview_above = False
         if preview_size not in (None, "large", "small"):
             logger.debug("Ignoring invalid preview_size %r", preview_size)
             preview_size = None
@@ -737,6 +809,37 @@ class Utils(InlineUnit):
 
         invert = bool(invert_media) or bool(preview_above)
         return show, webpage, invert
+
+    def _inherit_unit_preview(
+        self: "InlineManager",
+        unit: dict,
+        *,
+        link_preview: str | bool | None,
+        preview_size: str | None,
+        preview_above: bool | None,
+        invert_media: bool | None,
+    ) -> tuple[str | bool | None, str | None, bool, bool | None]:
+        """Keep a form's link preview and caption placement on later edits.
+
+        Omitted kwargs reuse the values stored when the form was created.
+        An explicit ``False`` still turns the option off. Webpage options are
+        not applied to a unit that already has its own photo, video, or file.
+        """
+        textual = not any(
+            unit.get(key) for key in ("photo", "gif", "video", "file", "audio", "location")
+        )
+        if textual:
+            if link_preview is None and "link_preview" in unit:
+                link_preview = unit["link_preview"]
+            if preview_size is None and unit.get("preview_size"):
+                preview_size = unit["preview_size"]
+            if preview_above is None and unit.get("preview_above"):
+                preview_above = True
+        if invert_media is None and unit.get("invert_media"):
+            invert_media = True
+        if preview_above is None:
+            preview_above = False
+        return link_preview, preview_size, preview_above, invert_media
 
     def stream(
         self: "InlineManager",

@@ -358,6 +358,7 @@ class List(InlineUnit):
                 unit_id=unit_id,
             )
             + [[{"text": "🔻 Close", "callback": callback, "args": ("close",)}]],
+            inline_safe=True,
         )
 
     async def _list_inline_handler(self: "InlineManager", inline_query):

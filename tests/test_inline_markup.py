@@ -21,11 +21,16 @@ from types import SimpleNamespace
 os.environ.setdefault("HEROKU_NO_GIT", "1")
 
 from herokutl.errors.rpcbaseerrors import RPCError
-from herokutl.errors.rpcerrorlist import FloodWaitError, MessageNotModifiedError
+from herokutl.errors.rpcerrorlist import (
+    ButtonTypeInvalidError,
+    FloodWaitError,
+    MessageNotModifiedError,
+)
 from herokutl.tl import types
 from herokutl.tl.functions.messages import SendMediaRequest, SetTypingRequest
 
 from heroku.inline.tl import (
+    INLINE_DISABLED_DATA,
     DraftStream,
     TelethonBot,
     apply_invert_media,
@@ -182,6 +187,47 @@ class MarkupTests(unittest.TestCase):
         self.assertIsNone(
             host._validate_markup([[{"text": "X", "disabled": False}]])
         )
+
+    def test_inline_results_soften_disabled_and_web_app(self):
+        host = MarkupHost()
+
+        async def user_callback(call):
+            return call
+
+        with self.assertLogs("heroku.inline.utils", level="DEBUG") as logs:
+            markup = host._generate_markup(
+                [
+                    [
+                        {
+                            "text": "Nope",
+                            "disabled": True,
+                            "callback": user_callback,
+                            "style": "danger",
+                        },
+                        {
+                            "text": "App",
+                            "web_app": "https://example.com",
+                            "style": "primary",
+                        },
+                        {"text": "Copy", "copy": "token", "style": "success"},
+                    ]
+                ],
+                inline_safe=True,
+            )
+        disabled, web, copy = markup[0]
+        self.assertIsInstance(disabled.type, types.InlineButtonTypeCallback)
+        self.assertEqual(disabled.type.data, INLINE_DISABLED_DATA)
+        self.assertTrue(disabled.style.bg_danger)
+        self.assertIsInstance(web.type, types.InlineButtonTypeUrl)
+        self.assertEqual(web.type.url, "https://example.com")
+        self.assertTrue(web.style.bg_primary)
+        self.assertIsInstance(copy.type, types.InlineButtonTypeCopy)
+        self.assertEqual(
+            host._custom_map[INLINE_DISABLED_DATA.decode()]["handler"].__func__,
+            Utils._disabled_inline_button,
+        )
+        self.assertNotIn(user_callback, [item["handler"] for item in host._custom_map.values()])
+        self.assertTrue(any("web_app" in line for line in logs.output))
 
     def test_ephemeral_answer_action_is_wired(self):
         host = MarkupHost()
@@ -598,6 +644,87 @@ class EphemeralTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PreviewAndRichTests(unittest.IsolatedAsyncioTestCase):
+    async def test_button_type_invalid_retries_once(self):
+        host = MarkupHost()
+        seen = []
+
+        class RawQuery:
+            id = 1
+            text = ""
+            sender_id = 1
+
+            async def answer(self, results, **kwargs):
+                buttons = results[0].send_message.reply_markup.rows[0].buttons
+                seen.append([type(button.type).__name__ for button in buttons])
+                if len(seen) == 1:
+                    raise ButtonTypeInvalidError(types.InputPeerEmpty())
+                return True
+
+        disabled = make_button(text="Off", disabled=True, style="danger")
+        web = make_button(text="App", web_app="https://example.com", style="primary")
+        result = types.InputBotInlineResult(
+            id="1",
+            type="article",
+            title="t",
+            send_message=types.InputBotInlineMessageText(
+                message="hi",
+                reply_markup=types.ReplyInlineMarkup(
+                    rows=[types.KeyboardInlineButtonRow(buttons=[disabled, web])]
+                ),
+            ),
+        )
+        query = InlineQuery(RawQuery())
+        query._manager = host
+        with self.assertLogs("heroku.inline.types", level="WARNING") as logs:
+            self.assertTrue(await query.answer([result]))
+        self.assertEqual(
+            seen,
+            [
+                ["InlineButtonTypeDisabled", "InlineButtonTypeWebView"],
+                ["InlineButtonTypeCallback", "InlineButtonTypeUrl"],
+            ],
+        )
+        self.assertEqual(result.send_message.reply_markup.rows[0].buttons[1].type.url, "https://example.com")
+        self.assertEqual(
+            result.send_message.reply_markup.rows[0].buttons[0].type.data,
+            INLINE_DISABLED_DATA,
+        )
+        self.assertIn(INLINE_DISABLED_DATA.decode(), host._custom_map)
+        self.assertEqual(len(logs.output), 1)
+
+    async def test_edit_keeps_stored_link_preview(self):
+        calls = []
+
+        class Client:
+            async def edit_message(self, *args, **kwargs):
+                calls.append(kwargs)
+                return True
+
+        host = MarkupHost()
+        host._bot_client = Client()
+        host.sanitise_text = lambda text: text
+        host._units["unit"] = {
+            "text": "Preview of https://telegram.org",
+            "buttons": [],
+            "link_preview": "https://telegram.org",
+            "preview_size": "large",
+            "preview_above": True,
+            "inline_message_id": "mid",
+        }
+        ok = await host._edit_unit(
+            "Preview of https://telegram.org",
+            unit_id="unit",
+            inline_message_id="mid",
+        )
+        self.assertTrue(ok)
+        webpage = calls[0]["file"]
+        self.assertIsInstance(webpage, types.InputMediaWebPage)
+        self.assertEqual(webpage.url, "https://telegram.org")
+        self.assertTrue(webpage.force_large_media)
+        self.assertTrue(webpage.optional)
+        self.assertTrue(calls[0]["invert_media"])
+        self.assertTrue(calls[0]["link_preview"])
+
     async def test_webpage_article_flags(self):
         class Builder:
             class Client:

@@ -461,6 +461,15 @@ class Form(InlineUnit):
         ):
             if needs_premium_emoji_pre_edit:
                 await asyncio.sleep(0.3)
+            edit_kwargs = {}
+            if link_preview not in (None, False):
+                edit_kwargs["link_preview"] = link_preview
+            if preview_size:
+                edit_kwargs["preview_size"] = preview_size
+            if preview_above:
+                edit_kwargs["preview_above"] = True
+            if invert_media:
+                edit_kwargs["invert_media"] = True
             if not await msg.edit(
                 text,
                 reply_markup=(
@@ -468,6 +477,7 @@ class Form(InlineUnit):
                     if not isinstance(base_reply_markup, Placeholder)
                     else reply_markup
                 ),
+                **edit_kwargs,
             ):
                 with contextlib.suppress(Exception):
                     await msg.delete()
@@ -529,6 +539,9 @@ class Form(InlineUnit):
         form_text = "🪐" if form.get("premium_emoji_pre_edit") else form.get("text")
         invert_caption = bool(form.get("invert_media"))
 
+        def buttons_for(source):
+            return self.generate_markup(source, inline_safe=True)
+
         async def answer_result(result, *, invert: bool = False):
             apply_invert_media(result, invert)
             await inline_query.answer([result], cache_time=0)
@@ -544,7 +557,7 @@ class Form(InlineUnit):
                             await inline_query.rich_article(
                                 title="Heroku",
                                 html=rich_value,
-                                buttons=self.generate_markup(form["uid"]),
+                                buttons=buttons_for(form["uid"]),
                                 id=utils.rand(20),
                             )
                         ],
@@ -557,7 +570,7 @@ class Form(InlineUnit):
                             id=utils.rand(20),
                             text=form_text,
                             parse_mode="HTML",
-                            buttons=self.generate_markup(
+                            buttons=buttons_for(
                                 form["uid"],
                             ),
                         ),
@@ -572,7 +585,7 @@ class Form(InlineUnit):
                             id=utils.rand(20),
                             text=form_text,
                             parse_mode="HTML",
-                            buttons=self.generate_markup(
+                            buttons=buttons_for(
                                 form["uid"],
                             ),
                         ),
@@ -589,7 +602,7 @@ class Form(InlineUnit):
                             text=form_text,
                             parse_mode="HTML",
                             mime_type="video/mp4",
-                            buttons=self.generate_markup(
+                            buttons=buttons_for(
                                 form["uid"],
                             ),
                         ),
@@ -605,7 +618,7 @@ class Form(InlineUnit):
                             text=form_text,
                             parse_mode="HTML",
                             mime_type=form["mime_type"],
-                            buttons=self.generate_markup(
+                            buttons=buttons_for(
                                 form["uid"],
                             ),
                         ),
@@ -622,7 +635,7 @@ class Form(InlineUnit):
                                 ),
                                 period=60,
                                 id=utils.rand(20),
-                                buttons=self.generate_markup(
+                                buttons=buttons_for(
                                     form["uid"],
                                 ),
                             )
@@ -638,7 +651,7 @@ class Form(InlineUnit):
                             id=utils.rand(20),
                             text=form_text,
                             parse_mode="HTML",
-                            buttons=self.generate_markup(
+                            buttons=buttons_for(
                                 form["uid"],
                             ),
                         ),
@@ -646,7 +659,7 @@ class Form(InlineUnit):
                     )
                 case _:
                     preview = self._form_link_preview(form)
-                    buttons = self.generate_markup(inline_query.query)
+                    buttons = buttons_for(inline_query.query)
                     above = bool(preview.get("above") or invert_caption)
                     if preview["mode"] == "webpage":
                         await answer_result(

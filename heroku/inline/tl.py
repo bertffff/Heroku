@@ -30,6 +30,10 @@ from .._internal import normalize_rich_html
 
 logger = logging.getLogger(__name__)
 
+# Callback payload for a disabled button emulated inside an inline result.
+# InlineButtonTypeDisabled is rejected by messages.setInlineBotResults.
+INLINE_DISABLED_DATA = b"heroku-nop"
+
 
 def _rejected_delivery_flags(exc: BaseException, *, protected: bool, effect) -> tuple[bool, object] | None:
     """Flags to keep after ``exc``, or ``None`` when the error must propagate.
@@ -955,6 +959,35 @@ def make_button(
         )
 
     return Button.inline(text, text, style=style, icon=icon)
+
+
+def soften_inline_button(button) -> bool:
+    """Replace button types Telegram rejects inside inline results.
+
+    ``ButtonTypeSimpleWebView`` is a reply-keyboard type, not an inline button,
+    so a web app becomes a URL. A disabled button becomes a callback the userbot
+    answers with an empty toast.
+    """
+    kind = type(getattr(button, "type", None)).__name__
+    if kind == "InlineButtonTypeWebView":
+        url = getattr(button.type, "url", None) or ""
+        button.type = types.InlineButtonTypeUrl(url=url)
+        return True
+    if kind == "InlineButtonTypeDisabled":
+        button.type = types.InlineButtonTypeCallback(data=INLINE_DISABLED_DATA)
+        return True
+    return False
+
+
+def soften_inline_result(result) -> bool:
+    """Rewrite unsafe buttons on one inline result. Returns True if any changed."""
+    message = getattr(result, "send_message", None)
+    markup = getattr(message, "reply_markup", None)
+    changed = False
+    for row in getattr(markup, "rows", None) or []:
+        for button in getattr(row, "buttons", None) or []:
+            changed = soften_inline_button(button) or changed
+    return changed
 
 
 class DraftStream:

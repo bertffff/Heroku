@@ -755,6 +755,8 @@ class Gallery(InlineUnit):
                 ]
             )
             + [[{"text": "🔻 Close", "callback": callback, "args": ("close",)}]]
+            ,
+            inline_safe=True,
         )
 
     async def _gallery_inline_handler(self: "InlineManager", inline_query):

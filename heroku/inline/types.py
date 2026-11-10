@@ -38,7 +38,9 @@ class InlineMessage:
         rich_message = kwargs.pop("rich_message", None)
         if rich_message is not None:
             rich_markup = (
-                self.inline_manager.generate_markup(kwargs.get("reply_markup"))
+                self.inline_manager.generate_markup(
+                    kwargs.get("reply_markup"), inline_safe=True
+                )
                 if kwargs.get("reply_markup") is not None
                 else None
             )
@@ -589,12 +591,42 @@ class InlineQuery:
         )
 
     async def answer(self, results=None, cache_time: int = 0, **kwargs):
-        return await self.inline_query.answer(
-            results or [],
-            cache_time=cache_time,
-            private=kwargs.pop("is_personal", kwargs.pop("private", False)),
-            **kwargs,
-        )
+        from herokutl.errors.rpcerrorlist import ButtonTypeInvalidError
+
+        from .tl import soften_inline_result
+
+        results = list(results or [])
+        private = kwargs.pop("is_personal", kwargs.pop("private", False))
+
+        async def _send():
+            return await self.inline_query.answer(
+                results,
+                cache_time=cache_time,
+                private=private,
+                **kwargs,
+            )
+
+        try:
+            return await _send()
+        except ButtonTypeInvalidError:
+            if getattr(self, "_inline_button_retry", False):
+                raise
+            changed = False
+            for item in results:
+                changed = soften_inline_result(item) or changed
+            if not changed:
+                raise
+            logger.warning(
+                "Inline result rejected a button type; retrying once with URL and callback buttons"
+            )
+            manager = getattr(self, "_manager", None)
+            if manager is not None:
+                manager._ensure_inline_disabled_noop()
+            self._inline_button_retry = True
+            try:
+                return await _send()
+            finally:
+                self._inline_button_retry = False
 
     async def _get_res(self, title: str, description: str, thumbnail_url: str) -> list:
         return [
