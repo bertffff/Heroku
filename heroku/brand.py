@@ -26,6 +26,7 @@ remote is renamed; the updater and install docs read this constant.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
@@ -57,10 +58,51 @@ ASSET_BANNER = f"{RAW_BASE}/assets/banner.png"
 ASSET_LOGO = f"{RAW_BASE}/assets/logo.png"
 ASSET_FAVICON = f"{RAW_BASE}/assets/favicon.png"
 
-# Existing installs still use the old channel title. New ones use Kanjo.
-# Lookup prefers the legacy title when both are present.
-ASSET_CHANNEL_TITLES = ("heroku-userbot", "kanjo-userbot")
+# Cache reads prefer the renamed title, then the legacy one.
+ASSET_CHANNEL_TITLES = ("kanjo-userbot", "heroku-userbot")
+# Which dialog to attach to before a rename: an existing Heroku channel wins.
+ASSET_CHANNEL_DIALOG_TITLES = ("heroku-userbot", "kanjo-userbot")
 ASSET_FOLDER_TITLES = ("heroku", "kanjo")
+LEGACY_CHANNEL_TITLE = "heroku-userbot"
+KANJO_CHANNEL_TITLE = "kanjo-userbot"
+LEGACY_FOLDER_TITLE = "Heroku"
+KANJO_FOLDER_TITLE = "Kanjo"
+LEGACY_BOT_NAMES = frozenset({"🪐 Heroku userbot"})
+KANJO_BOT_NAME = "🎴 Kanjo userbot"
+
+# Exact banner URLs that shipped as Heroku defaults. A saved custom URL
+# is left alone.
+LEGACY_BANNER_URLS = frozenset(
+    {
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_info.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_cmd.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/start_cmd.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_started.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku_installation.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/heroku.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/joined_jr.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/declined_jr.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/join_request.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/unit_alpha.jpg",
+        "https://raw.githubusercontent.com/Heroku-userbot/assets/refs/heads/main/ping_cmd.jpg",
+    }
+)
+
+# Stable module ids stay the strings["name"] / database id. .help and
+# .config show the Kanjo label, and lookup accepts both.
+CORE_DISPLAY_NAMES = {
+    "HerokuInfo": "KanjoInfo",
+    "HerokuConfig": "KanjoConfig",
+    "HerokuSettings": "KanjoSettings",
+    "HerokuBackup": "KanjoBackup",
+    "HerokuAccounts": "KanjoAccounts",
+    "HerokuSecurity": "KanjoSecurity",
+}
+
+_TG_EMOJI = re.compile(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", re.IGNORECASE | re.DOTALL)
+
+MIGRATION_DB_NS = "heroku.main"
+MIGRATION_DB_KEY = "legacy_branding_migrated"
 
 
 def local_asset(name: str) -> Path:
@@ -90,10 +132,72 @@ def asset_topic_id(forums_cache: Mapping | None, topic_name: str):
 
 def preferred_asset_channel(found: Mapping):
     """Entity for an existing asset channel, legacy title first."""
-    for title in ASSET_CHANNEL_TITLES:
+    for title in ASSET_CHANNEL_DIALOG_TITLES:
         if title in found:
             return found[title]
     return None
+
+
+def public_module_name(name: str | None) -> str:
+    """Name shown in .help and .config. Unknown names pass through."""
+    if not name:
+        return ""
+    return CORE_DISPLAY_NAMES.get(str(name), str(name))
+
+
+def module_stable_name(mod) -> str:
+    """Lookup id stored on the module. Class names and DB keys stay put."""
+    stable = str(getattr(mod, "name", "") or "")
+    if stable:
+        return stable
+    strings = getattr(mod, "strings", None)
+    try:
+        if callable(strings):
+            stable = str(strings("name") or "")
+        elif isinstance(strings, Mapping):
+            stable = str(strings.get("name") or "")
+    except Exception:
+        stable = ""
+    return stable or mod.__class__.__name__
+
+
+def module_public_name(mod) -> str:
+    return public_module_name(module_stable_name(mod))
+
+
+def module_lookup_names(mod) -> set[str]:
+    """Every name that should resolve to this module, lowercased."""
+    stable = module_stable_name(mod)
+    names = {mod.__class__.__name__, stable, public_module_name(stable)}
+    for legacy, shown in CORE_DISPLAY_NAMES.items():
+        if stable == shown:
+            names.add(legacy)
+        if stable == legacy:
+            names.add(shown)
+    return {name.lower() for name in names if name}
+
+
+def visible_config_text(value: str) -> str:
+    """Fallback character inside a tg-emoji tag. The stored value stays."""
+    return _TG_EMOJI.sub(lambda match: match.group(1), value)
+
+
+def retarget_forums_cache(cache: Mapping | None) -> dict:
+    """Keep topic ids readable under both channel titles.
+
+    Both keys share one dict so a later write through either title is seen
+    by the other during this process. After a restart, ``kanjo-userbot`` is
+    checked first.
+    """
+    data = dict(cache or {})
+    old = data.get(LEGACY_CHANNEL_TITLE)
+    new = data.get(KANJO_CHANNEL_TITLE)
+    old = dict(old) if isinstance(old, Mapping) else {}
+    new = dict(new) if isinstance(new, Mapping) else {}
+    merged = {**old, **new}
+    data[KANJO_CHANNEL_TITLE] = merged
+    data[LEGACY_CHANNEL_TITLE] = merged
+    return data
 
 # HEROKU_* remains the name the rest of the code writes. KANJO_* is accepted
 # when the Heroku variable is unset or blank. A non-empty HEROKU_* wins.

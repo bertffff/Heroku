@@ -479,7 +479,9 @@ class CommandDispatcher:
         buttons = []
         for handler in handlers:
             module = handler.__self__
-            name = module.strings["name"]
+            from .brand import module_public_name
+
+            name = module_public_name(module)
             buttons.append([{
                 "text": name,
                 "emoji_id": "5872695159631647090",

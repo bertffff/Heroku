@@ -1026,16 +1026,14 @@ class Modules:
         self,
         modname: str,
     ) -> bool | Module | Library:
+        from .brand import module_lookup_names
+
+        wanted = modname.lower()
         return next(
-            (lib for lib in self.libraries if lib.name.lower() == modname.lower()),
+            (lib for lib in self.libraries if lib.name.lower() == wanted),
             False,
         ) or next(
-            (
-                mod
-                for mod in self.modules
-                if mod.__class__.__name__.lower() == modname.lower()
-                or getattr(mod, "name", "").lower() == modname.lower()
-            ),
+            (mod for mod in self.modules if wanted in module_lookup_names(mod)),
             False,
         )
 

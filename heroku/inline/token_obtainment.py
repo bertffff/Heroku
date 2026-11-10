@@ -99,7 +99,7 @@ class TokenObtainment(InlineUnit):
                 username = f"@kanjo_{uid}_bot"
 
             for msg in [
-                "Kanjo userbot"[:64],
+                "🎴 Kanjo userbot"[:64],
                 username,
                 "/setinline",
                 username,

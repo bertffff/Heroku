@@ -1759,10 +1759,13 @@ class LoaderMod(loader.Module):
                 continue
 
             classname = module.__class__.__name__
-            public_name = str(getattr(module, "name", "") or module.strings["name"])
+            from ..brand import module_public_name
+
+            public_name = module_public_name(module)
             names = {
                 classname,
                 classname[:-3] if classname.endswith("Mod") else classname,
+                str(getattr(module, "name", "") or ""),
                 public_name,
             }
             score = max(

@@ -86,7 +86,10 @@ class HerokuConfigMod(loader.Module):
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
         if isinstance(value, str):
-            return f"<b><code>{utils.escape_html(value.strip())}</code></b>"
+            from ..brand import visible_config_text
+
+            shown = visible_config_text(value.strip())
+            return f"<b><code>{utils.escape_html(shown)}</code></b>"
 
         if isinstance(value, list) and value:
             return (
@@ -1303,13 +1306,16 @@ class HerokuConfigMod(loader.Module):
                 mod_name = mod.__class__.__name__
 
             cls_name = mod.__class__.__name__
-            names = {mod_name, cls_name}
+            from ..brand import public_module_name
+
+            shown = public_module_name(mod_name)
+            names = {mod_name, shown, cls_name}
             if cls_name.endswith("Mod"):
                 names.add(cls_name[:-3])
 
             for name in names:
                 if name.lower() == query_lower:
-                    return mod_name, True
+                    return shown, True
                 score = difflib.SequenceMatcher(None, query_lower, name.lower()).ratio()
                 if score > best_score:
                     best_score = score
@@ -1333,9 +1339,12 @@ class HerokuConfigMod(loader.Module):
         for mod in self.allmodules.modules:
             if not hasattr(mod, "config") or not mod.config:
                 continue
-            mod_name = (
+            from ..brand import public_module_name
+
+            raw_name = (
                 mod.strings("name") if callable(mod.strings) else mod.__class__.__name__
             )
+            mod_name = public_module_name(raw_name)
             module_folders = set()
             for param in mod.config:
                 config_value = mod.config._config.get(param)
@@ -1522,8 +1531,10 @@ class HerokuConfigMod(loader.Module):
         obj_type: bool | str = False,
     ):
         if isinstance(obj_type, bool):
+            from ..brand import module_public_name
+
             to_config = [
-                mod.strings("name")
+                module_public_name(mod)
                 for mod in self.allmodules.modules
                 if hasattr(mod, "config")
                 and callable(mod.strings)

@@ -51,7 +51,7 @@ class AssetChannelCacheTest(unittest.TestCase):
             "heroku-userbot": {"Assets": 1},
             "kanjo-userbot": {"Assets": 2},
         }
-        self.assertEqual(asset_topic_id(cache, "Assets"), 1)
+        self.assertEqual(asset_topic_id(cache, "Assets"), 2)
         found = {"kanjo-userbot": "new", "heroku-userbot": "old"}
         self.assertEqual(preferred_asset_channel(found), "old")
 

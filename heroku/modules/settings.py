@@ -17,13 +17,18 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 
+import asyncio
 import contextlib
 import getpass
+import logging
+
 import herokutl
 from herokutl.tl.types import Message, User
 
 from .. import brand, loader, main, utils, version
 from ..inline.types import InlineCall
+
+logger = logging.getLogger(__name__)
 
 
 @loader.tds
@@ -57,6 +62,12 @@ class CoreMod(loader.Module):
                 lambda: self.strings["_cfg_keep_message_state"],
                 validator=loader.validators.Boolean(),
             ),
+            loader.ConfigValue(
+                "migrate_legacy_branding",
+                True,
+                lambda: self.strings["_cfg_migrate_legacy_branding"],
+                validator=loader.validators.Boolean(),
+            ),
         )
 
     async def client_ready(self):
@@ -76,6 +87,27 @@ class CoreMod(loader.Module):
             ],
             2,
         )
+        try:
+            asyncio.get_running_loop().create_task(self._migrate_legacy_branding())
+        except Exception:
+            logger.warning(
+                "Could not schedule the legacy branding migration",
+                exc_info=True,
+            )
+
+    async def _migrate_legacy_branding(self):
+        try:
+            from ..legacy_branding import run_legacy_branding
+
+            enabled = bool(self.config["migrate_legacy_branding"])
+            await run_legacy_branding(
+                self._db,
+                self._client,
+                self.allmodules.modules,
+                enabled=enabled,
+            )
+        except Exception:
+            logger.warning("Legacy branding migration failed", exc_info=True)
 
     async def blacklistcommon(self, message: Message):
         args = utils.get_args(message)

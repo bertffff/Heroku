@@ -189,8 +189,14 @@ class Help(loader.Module):
                             reversed(
                                 sorted(
                                     [
-                                        module.strings["name"]
+                                        name
                                         for module in self.allmodules.modules
+                                        for name in {
+                                            getattr(module, "name", None)
+                                            or module.strings["name"],
+                                            brand.module_public_name(module),
+                                        }
+                                        if name
                                     ],
                                     key=lambda x: difflib.SequenceMatcher(
                                         None,
@@ -207,7 +213,7 @@ class Help(loader.Module):
                 exact = False
 
         try:
-            name = module.strings("name")
+            name = brand.module_public_name(module)
         except (KeyError, AttributeError):
             name = getattr(module, "name", "ERROR")
 
@@ -426,7 +432,7 @@ class Help(loader.Module):
             tmp = ""
 
             try:
-                name = mod.strings["name"]
+                name = brand.module_public_name(mod)
             except KeyError:
                 name = getattr(mod, "name", "ERROR")
 
